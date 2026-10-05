@@ -40,6 +40,8 @@
   .sym { color: var(--muted); font-size: 13px; }
   .price { font-weight: 600; font-size: 17px; text-align: right; white-space: nowrap; }
   .upd { color: var(--muted); font-size: 12px; text-align: right; }
+  .cur { font-size: 14px; text-align: right; margin-top: 6px; white-space: nowrap; }
+  .pos { color: #1a8f3c; } .neg { color: var(--danger); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .chip { background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
   .notes { margin-top: 10px; color: var(--text); font-size: 15px; white-space: pre-wrap; }
@@ -110,6 +112,7 @@
         <div><div class="name" id="pName"></div><div class="sym" id="pSym"></div></div>
         <div class="price" id="pPrice"></div>
       </div>
+      <div class="hint" id="pHint">Dieser Kurs wird als Erfassungskurs fix gespeichert.</div>
     </div>
 
     <div class="grid2">

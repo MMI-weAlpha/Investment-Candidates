@@ -34,6 +34,17 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
+  // Erfassungskurs: wird beim Anlegen einmal gespeichert und nie mehr überschrieben.
+  await pool.query('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS entry_price NUMERIC');
+  await pool.query('UPDATE candidates SET entry_price = price WHERE entry_price IS NULL');
+}
+
+function out(r) {
+  return {
+    ...r,
+    price: r.price === null ? null : Number(r.price),
+    entry_price: r.entry_price === null ? null : Number(r.entry_price)
+  };
 }
 
 // Einfacher Zugriffsschutz (optional): nur aktiv, wenn ACCESS_CODE gesetzt ist.
@@ -98,20 +109,20 @@ function cleanLinks(links) {
 
 app.get('/api/candidates', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM candidates ORDER BY created_at DESC');
-  res.json(rows.map((r) => ({ ...r, price: r.price === null ? null : Number(r.price) })));
+  res.json(rows.map(out));
 }));
 
 app.post('/api/candidates', wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.symbol || !b.name) return res.status(400).json({ error: 'Name und Ticker erforderlich' });
   const { rows } = await pool.query(
-    `INSERT INTO candidates (symbol, name, price, currency, sector, country, region, notes, links, price_updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END)
+    `INSERT INTO candidates (symbol, name, price, entry_price, currency, sector, country, region, notes, links, price_updated_at)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END)
      RETURNING *`,
     [b.symbol, b.name, b.price ?? null, b.currency || null, b.sector || null, b.country || null,
      b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
   );
-  res.status(201).json({ ...rows[0], price: rows[0].price === null ? null : Number(rows[0].price) });
+  res.status(201).json(out(rows[0]));
 }));
 
 app.put('/api/candidates/:id', wrap(async (req, res) => {
@@ -123,7 +134,7 @@ app.put('/api/candidates/:id', wrap(async (req, res) => {
      b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
   );
   if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
-  res.json({ ...rows[0], price: rows[0].price === null ? null : Number(rows[0].price) });
+  res.json(out(rows[0]));
 }));
 
 app.delete('/api/candidates/:id', wrap(async (req, res) => {

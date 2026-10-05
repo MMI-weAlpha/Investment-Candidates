@@ -10,6 +10,15 @@
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
   const fmtPrice = (p, cur) => p == null ? '–' : new Intl.NumberFormat('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p) + (cur ? ' ' + cur : '');
   const fmtDate = (d) => d ? new Date(d).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const fmtDay = (d) => d ? new Date(d).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+  // Aktueller Kurs + Veränderung seit Erfassung (nur wenn der Kurs inzwischen aktualisiert wurde)
+  const currentBlock = (i) => {
+    if (i.entry_price == null || i.price == null || !i.price_updated_at) return '';
+    const pct = (i.price / i.entry_price - 1) * 100;
+    const cls = pct >= 0 ? 'pos' : 'neg';
+    const sign = pct >= 0 ? '+' : '';
+    return `<div class="cur">Aktuell ${esc(fmtPrice(i.price, i.currency))} <b class="${cls}">${sign}${pct.toFixed(1)}%</b></div><div class="upd">Stand ${esc(fmtDate(i.price_updated_at))}</div>`;
+  };
   let toastTimer;
   const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.display = 'none'), 2500); };
 
@@ -64,7 +73,7 @@
       <article class="card" data-id="${i.id}">
         <div class="row">
           <div><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}</div></div>
-          <div><div class="price">${esc(fmtPrice(i.price, i.currency))}</div><div class="upd">${esc(fmtDate(i.price_updated_at))}</div></div>
+          <div><div class="price">${esc(fmtPrice(i.entry_price, i.currency))}</div><div class="upd">Erfassungskurs ${esc(fmtDay(i.created_at))}</div>${currentBlock(i)}</div>
         </div>
         <div class="chips">
           ${[i.sector, i.country, i.region].filter(Boolean).map((v) => `<span class="chip">${esc(v)}</span>`).join('')}
@@ -123,10 +132,11 @@
     $('results').hidden = true;
     $('sq').value = '';
     $('picked').hidden = !c;
+    $('pHint').hidden = !!c;
     if (c) {
       $('pName').textContent = c.name;
       $('pSym').textContent = c.symbol;
-      $('pPrice').textContent = fmtPrice(c.price, c.currency);
+      $('pPrice').textContent = fmtPrice(c.entry_price, c.currency);
     }
     $('fs').value = c?.sector || '';
     $('fc').value = c?.country || '';

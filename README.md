@@ -25,7 +25,8 @@ Die Tabelle wird beim ersten Start automatisch angelegt.
 - **+** unten rechts: Name oder Ticker tippen, Treffer wählen → Kurs, Sektor,
   Land und Region werden gefüllt (jederzeit von Hand änderbar).
 - Artikel-Links mit «+ Link hinzufügen» erfassen, optional mit Titel.
-- «Kurse aktualisieren» holt für alle Kandidaten den aktuellen Kurs.
+- Der Kurs beim Erfassen wird als **Erfassungskurs** fix gespeichert und nie überschrieben.
+- «Kurse aktualisieren» holt den aktuellen Kurs und zeigt die Veränderung seit der Erfassung.
 - Oben Suche und Filter nach Sektor und Region.
 
 ## Hinweise
