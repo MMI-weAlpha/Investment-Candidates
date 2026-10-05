@@ -142,22 +142,29 @@ app.delete('/api/candidates/:id', wrap(async (req, res) => {
   res.status(204).end();
 }));
 
-// --- Kurse aller Kandidaten aktualisieren ---
+// --- Kurse aller Kandidaten aktualisieren (ein gebündelter Abruf) ---
 app.post('/api/refresh', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT id, symbol FROM candidates');
+  if (!rows.length) return res.json({ updated: 0, total: 0 });
+  const symbols = [...new Set(rows.map((r) => r.symbol))];
+  let quotes = [];
+  try {
+    quotes = await yahooFinance.quote(symbols);
+  } catch (e) {
+    console.error('Gebündelter Kursabruf fehlgeschlagen:', e.message);
+    const single = await Promise.allSettled(symbols.map((sym) => yahooFinance.quote(sym)));
+    quotes = single.filter((x) => x.status === 'fulfilled' && x.value).map((x) => x.value);
+  }
+  const bySymbol = new Map(quotes.map((q) => [q.symbol, q]));
   let updated = 0;
   for (const r of rows) {
-    try {
-      const q = await yahooFinance.quote(r.symbol);
-      if (q && q.regularMarketPrice != null) {
-        await pool.query(
-          'UPDATE candidates SET price=$2, currency=COALESCE($3,currency), price_updated_at=now() WHERE id=$1',
-          [r.id, q.regularMarketPrice, q.currency || null]
-        );
-        updated++;
-      }
-    } catch (e) {
-      console.error('Kurs fehlgeschlagen für', r.symbol, e.message);
+    const q = bySymbol.get(r.symbol);
+    if (q && q.regularMarketPrice != null) {
+      await pool.query(
+        'UPDATE candidates SET price=$2, currency=COALESCE($3,currency), price_updated_at=now() WHERE id=$1',
+        [r.id, q.regularMarketPrice, q.currency || null]
+      );
+      updated++;
     }
   }
   res.json({ updated, total: rows.length });

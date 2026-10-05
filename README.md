@@ -26,7 +26,9 @@ Die Tabelle wird beim ersten Start automatisch angelegt.
   Land und Region werden gefüllt (jederzeit von Hand änderbar).
 - Artikel-Links mit «+ Link hinzufügen» erfassen, optional mit Titel.
 - Der Kurs beim Erfassen wird als **Erfassungskurs** fix gespeichert und nie überschrieben.
+- Die Kurse werden automatisch aktualisiert, sobald du die App öffnest oder wieder in den Vordergrund holst (höchstens alle 2 Minuten).
 - «Kurse aktualisieren» holt den aktuellen Kurs und zeigt die Veränderung seit der Erfassung.
+- **Dashboard** (Standardansicht): Liste mit Datum, Erfassungskurs, aktuellem Kurs und Veränderung in %. Tippen auf einen Eintrag öffnet die Details. Umschalten auf «Karten» möglich, Sortierung nach Datum, Performance oder Name.
 - Oben Suche und Filter nach Sektor und Region.
 
 ## Hinweise

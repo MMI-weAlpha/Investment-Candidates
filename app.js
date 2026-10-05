@@ -19,6 +19,12 @@
     const sign = pct >= 0 ? '+' : '';
     return `<div class="cur">Aktuell ${esc(fmtPrice(i.price, i.currency))} <b class="${cls}">${sign}${pct.toFixed(1)}%</b></div><div class="upd">Stand ${esc(fmtDate(i.price_updated_at))}</div>`;
   };
+  const pctOf = (i) => (i.entry_price != null && i.price != null && Number(i.entry_price) !== 0) ? (i.price / i.entry_price - 1) * 100 : null;
+  const pctHtml = (p) => p == null ? '<span class="muted">–</span>' : `<b class="${p >= 0 ? 'pos' : 'neg'}">${p >= 0 ? '+' : ''}${p.toFixed(1)}%</b>`;
+  const fmtNum = (p) => p == null ? '–' : new Intl.NumberFormat('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p);
+  const fmtShort = (d) => d ? new Date(d).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+  let view = localStorage.getItem('view') === 'cards' ? 'cards' : 'dash';
+  let detailId = null;
   let toastTimer;
   const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.display = 'none'), 2500); };
 
@@ -58,17 +64,44 @@
     keep($('fRegion'), 'Region', regions);
   }
 
+  function sortedItems(arr) {
+    const mode = $('fSort').value;
+    const a = [...arr];
+    if (mode === 'perf') a.sort((x, y) => (pctOf(y) ?? -Infinity) - (pctOf(x) ?? -Infinity));
+    else if (mode === 'name') a.sort((x, y) => x.name.localeCompare(y.name, 'de'));
+    else a.sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+    return a;
+  }
+
   function render() {
     const q = $('q').value.trim().toLowerCase();
     const fs = $('fSector').value, fr = $('fRegion').value;
-    const shown = items.filter((i) =>
+    const shown = sortedItems(items.filter((i) =>
       (!q || (i.name + ' ' + i.symbol + ' ' + (i.notes || '')).toLowerCase().includes(q)) &&
-      (!fs || i.sector === fs) && (!fr || i.region === fr));
-    const list = $('list');
-    if (!shown.length) {
-      list.innerHTML = `<div class="empty">${items.length ? 'Keine Treffer.' : 'Noch keine Kandidaten.<br>Tippe auf + um den ersten zu erfassen.'}</div>`;
+      (!fs || i.sector === fs) && (!fr || i.region === fr)));
+
+    $('dash').hidden = view !== 'dash';
+    $('list').hidden = view !== 'cards';
+    $('vDash').classList.toggle('on', view === 'dash');
+    $('vCards').classList.toggle('on', view === 'cards');
+
+    const emptyHtml = `<div class="empty">${items.length ? 'Keine Treffer.' : 'Noch keine Kandidaten.<br>Tippe auf + um den ersten zu erfassen.'}</div>`;
+
+    if (view === 'dash') {
+      $('dash').innerHTML = !shown.length ? emptyHtml :
+        '<div class="dhead"><span>Kandidat</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
+        shown.map((i) => `
+        <div class="drow" data-id="${i.id}" role="button" tabindex="0">
+          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div></div>
+          <div class="dc"><div>${esc(fmtNum(i.entry_price))}</div><div class="sym">${esc(fmtShort(i.created_at))}</div></div>
+          <div class="dc"><div>${esc(fmtNum(i.price))}</div><div class="sym">${esc(fmtShort(i.price_updated_at))}</div></div>
+          <div class="dp">${pctHtml(pctOf(i))}</div>
+        </div>`).join('');
       return;
     }
+
+    const list = $('list');
+    if (!shown.length) { list.innerHTML = emptyHtml; return; }
     list.innerHTML = shown.map((i) => `
       <article class="card" data-id="${i.id}">
         <div class="row">
@@ -83,6 +116,52 @@
         <div class="actions"><button type="button" data-act="edit">Bearbeiten</button><button type="button" class="del" data-act="del">Löschen</button></div>
       </article>`).join('');
   }
+
+  // ---------- Details ----------
+  function openDetail(id) {
+    const i = items.find((x) => x.id === id);
+    if (!i) return;
+    detailId = id;
+    $('detailBody').innerHTML = `
+      <div class="name" style="font-size:20px">${esc(i.name)}</div>
+      <div class="sym">${esc(i.symbol)}</div>
+      <div class="chips">${[i.sector, i.country, i.region].filter(Boolean).map((v) => `<span class="chip">${esc(v)}</span>`).join('')}</div>
+      <div class="dgrid" style="margin-top:14px">
+        <div class="dbox"><div class="lbl">Erfassungskurs</div><div class="val">${esc(fmtNum(i.entry_price))}</div><div class="sub">${esc(fmtDay(i.created_at))}${i.currency ? ' · ' + esc(i.currency) : ''}</div></div>
+        <div class="dbox"><div class="lbl">Aktuell</div><div class="val">${esc(fmtNum(i.price))}</div><div class="sub">${i.price_updated_at ? esc(fmtDate(i.price_updated_at)) : ''}</div></div>
+        <div class="dbox"><div class="lbl">Veränderung</div><div class="val">${pctHtml(pctOf(i))}</div><div class="sub">seit Erfassung</div></div>
+      </div>
+      ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
+      ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}`;
+    $('detailDlg').showModal();
+  }
+
+  $('dash').addEventListener('click', (ev) => {
+    const r = ev.target.closest('.drow');
+    if (r) openDetail(Number(r.dataset.id));
+  });
+  $('dash').addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    const r = ev.target.closest('.drow');
+    if (r) openDetail(Number(r.dataset.id));
+  });
+  $('dClose').onclick = () => $('detailDlg').close();
+  $('dEdit').onclick = () => {
+    const c = items.find((x) => x.id === detailId);
+    $('detailDlg').close();
+    if (c) openDialog(c);
+  };
+  $('dDel').onclick = async () => {
+    const c = items.find((x) => x.id === detailId);
+    if (!c || !confirm(`«${c.name}» löschen?`)) return;
+    await api('/candidates/' + c.id, { method: 'DELETE' });
+    $('detailDlg').close();
+    await load();
+  };
+
+  const setView = (v) => { view = v; localStorage.setItem('view', v); render(); };
+  $('vDash').onclick = () => setView('dash');
+  $('vCards').onclick = () => setView('cards');
 
   async function load() {
     try {
@@ -248,8 +327,26 @@
     b.disabled = false; b.textContent = 'Kurse aktualisieren';
   };
 
-  ['q', 'fSector', 'fRegion'].forEach((id) => $(id).addEventListener('input', render));
+  ['q', 'fSector', 'fRegion', 'fSort'].forEach((id) => $(id).addEventListener('input', render));
+
+  // Kurse automatisch aktualisieren: beim Öffnen der App und wenn sie wieder in den Vordergrund kommt
+  let lastAuto = 0;
+  async function autoRefresh() {
+    if (Date.now() - lastAuto < 120000) return;
+    lastAuto = Date.now();
+    const b = $('refreshBtn');
+    if (b.disabled) return;
+    b.disabled = true; b.textContent = 'Aktualisiere…';
+    try {
+      await api('/refresh', { method: 'POST' });
+      await load();
+    } catch (_) {
+      lastAuto = 0;
+    }
+    b.disabled = false; b.textContent = 'Kurse aktualisieren';
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoRefresh(); });
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  load();
+  load().then(autoRefresh);
 })();
