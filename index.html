@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Kandidaten">
+<meta name="theme-color" content="#f5f5f7">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>Kandidaten</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --text: #1c1c1e; --muted: #6e6e73; --line: #e3e3e8;
+    --accent: #0a6cff; --danger: #d92d20; --chip: #eef1f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; --line: #2c2c2e; --accent: #4c9aff; --danger: #ff6b60; --chip: #2c2c2e; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+  body { padding: env(safe-area-inset-top) 0 calc(90px + env(safe-area-inset-bottom)); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 14px 16px 8px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  h1 { font-size: 28px; margin: 0; letter-spacing: -0.5px; }
+  .iconbtn { border: 0; background: var(--chip); color: var(--text); border-radius: 999px;
+    height: 36px; padding: 0 14px; font-size: 14px; }
+  .filters { display: flex; gap: 8px; padding: 0 16px 8px; overflow-x: auto; }
+  .filters input, .filters select { flex: 0 0 auto; border: 1px solid var(--line); background: var(--card);
+    color: var(--text); border-radius: 10px; padding: 8px 10px; font-size: 15px; }
+  .filters input { flex: 1 1 140px; min-width: 140px; }
+  #list { padding: 0 16px; display: grid; gap: 12px; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px 16px; border: 1px solid var(--line); }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  .name { font-weight: 600; font-size: 17px; }
+  .sym { color: var(--muted); font-size: 13px; }
+  .price { font-weight: 600; font-size: 17px; text-align: right; white-space: nowrap; }
+  .upd { color: var(--muted); font-size: 12px; text-align: right; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+  .notes { margin-top: 10px; color: var(--text); font-size: 15px; white-space: pre-wrap; }
+  .links { margin-top: 10px; display: grid; gap: 6px; }
+  .links a { color: var(--accent); text-decoration: none; font-size: 15px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .actions { margin-top: 10px; display: flex; gap: 14px; }
+  .actions button { border: 0; background: none; color: var(--accent); font-size: 15px; padding: 4px 0; }
+  .actions .del { color: var(--danger); }
+  .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
+  .fab { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom)); width: 58px; height: 58px;
+    border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 32px; line-height: 1;
+    box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  dialog { width: min(560px, 100%); max-height: 100%; margin: auto auto 0; border: 0; border-radius: 20px 20px 0 0;
+    padding: 0; background: var(--bg); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .sheet { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }
+  .sheet h2 { margin: 0; font-size: 20px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
+  input[type=text], input[type=url], input[type=password], textarea, select.f {
+    width: 100%; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 11px 12px; font-size: 16px; font-family: inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  .results { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .results button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+    background: none; color: var(--text); padding: 10px 12px; font-size: 15px; }
+  .results button:last-child { border-bottom: 0; }
+  .results small { color: var(--muted); display: block; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .linkrow { display: grid; grid-template-columns: 1fr 36px; gap: 8px; margin-bottom: 8px; }
+  .linkrow .rm { border: 0; background: var(--chip); color: var(--text); border-radius: 10px; font-size: 18px; }
+  .btn { border: 0; border-radius: 12px; padding: 13px; font-size: 17px; font-weight: 600; width: 100%; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.secondary { background: var(--chip); color: var(--text); }
+  .btn:disabled { opacity: .5; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .err { color: var(--danger); font-size: 14px; }
+  #toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: #000c; color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 14px; display: none; z-index: 20; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kandidaten</h1>
+  <button class="iconbtn" id="refreshBtn" type="button">Kurse aktualisieren</button>
+</header>
+<div class="filters">
+  <input id="q" type="search" placeholder="Suchen…" aria-label="Suchen">
+  <select id="fSector" aria-label="Sektor"><option value="">Sektor</option></select>
+  <select id="fRegion" aria-label="Region"><option value="">Region</option></select>
+</div>
+<main id="list"></main>
+<button class="fab" id="addBtn" type="button" aria-label="Kandidat hinzufügen">+</button>
+<div id="toast"></div>
+
+<dialog id="dlg">
+  <form class="sheet" id="form" method="dialog">
+    <h2 id="dlgTitle">Neuer Kandidat</h2>
+
+    <div id="searchBox">
+      <label for="sq">Name oder Ticker</label>
+      <input type="text" id="sq" autocomplete="off" autocapitalize="none" placeholder="z. B. Nestlé oder NESN.SW">
+      <div class="results" id="results" hidden></div>
+    </div>
+
+    <div id="picked" hidden>
+      <div class="row">
+        <div><div class="name" id="pName"></div><div class="sym" id="pSym"></div></div>
+        <div class="price" id="pPrice"></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div><label for="fs">Sektor</label><input type="text" id="fs"></div>
+      <div><label for="fc">Land</label><input type="text" id="fc"></div>
+    </div>
+    <div>
+      <label for="fr">Region</label>
+      <select class="f" id="fr"></select>
+    </div>
+
+    <div>
+      <label for="fn">Notizen (warum interessant?)</label>
+      <textarea id="fn"></textarea>
+    </div>
+
+    <div>
+      <label>Artikel-Links</label>
+      <div id="links"></div>
+      <button type="button" class="btn secondary" id="addLink">+ Link hinzufügen</button>
+    </div>
+
+    <div class="err" id="err"></div>
+    <button type="submit" class="btn primary" id="save" disabled>Speichern</button>
+    <button type="button" class="btn secondary" id="cancel">Abbrechen</button>
+  </form>
+</dialog>
+
+<dialog id="codeDlg">
+  <form class="sheet" id="codeForm" method="dialog">
+    <h2>Zugangscode</h2>
+    <p class="hint">Dieser Dienst ist mit einem Code geschützt.</p>
+    <input type="password" id="codeInput" autocomplete="current-password">
+    <button type="submit" class="btn primary">OK</button>
+  </form>
+</dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>
