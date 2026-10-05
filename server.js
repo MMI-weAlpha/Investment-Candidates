@@ -152,7 +152,21 @@ app.post('/api/refresh', wrap(async (_req, res) => {
   res.json({ updated, total: rows.length });
 }));
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Seite ausliefern: normalerweise aus dem Ordner "public". Falls die Dateien
+// beim Hochladen auf GitHub flach (ohne Ordner) gelandet sind, werden sie
+// einzeln aus dem Hauptverzeichnis ausgeliefert.
+const fs = require('fs');
+const publicDir = path.join(__dirname, 'public');
+if (fs.existsSync(path.join(publicDir, 'index.html'))) {
+  app.use(express.static(publicDir));
+} else {
+  const FILES = ['index.html', 'app.js', 'manifest.json', 'sw.js', 'icon.svg', 'apple-touch-icon.png'];
+  console.log('Ordner public nicht gefunden, liefere Dateien aus dem Hauptverzeichnis aus.');
+  app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+  for (const f of FILES) {
+    app.get('/' + f, (_req, res) => res.sendFile(path.join(__dirname, f)));
+  }
+}
 
 const PORT = process.env.PORT || 3000;
 initDb()
