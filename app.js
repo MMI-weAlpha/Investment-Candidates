@@ -23,6 +23,35 @@
   const pctHtml = (p) => p == null ? '<span class="muted">–</span>' : `<b class="${p >= 0 ? 'pos' : 'neg'}">${p >= 0 ? '+' : ''}${p.toFixed(1)}%</b>`;
   const fmtNum = (p) => p == null ? '–' : new Intl.NumberFormat('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p);
   const fmtShort = (d) => d ? new Date(d).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+  const fmtIso = (d) => d ? d.slice(8, 10) + '.' + d.slice(5, 7) + '.' + d.slice(0, 4) : '';
+  const fmtIsoShort = (d) => d ? d.slice(8, 10) + '.' + d.slice(5, 7) + '.' + d.slice(2, 4) : '';
+  const fmtFull = (d) => d ? new Date(d).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const fmtQty = (q) => new Intl.NumberFormat('de-CH', { maximumFractionDigits: 4 }).format(q);
+  const todayIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const parseNum = (v) => { const t = String(v ?? '').trim().replace(/['\s]/g, '').replace(',', '.'); if (!t) return null; const n = Number(t); return Number.isFinite(n) ? n : NaN; };
+  // Veränderung seit Kauf: nur beim Kauf eines Titels sinnvoll (bei Optionen ist der Preis die Prämie)
+  const invPct = (i) => (i.inv_type === 'Kauf Titel' && i.inv_price > 0 && i.price != null) ? (i.price / i.inv_price - 1) * 100 : null;
+  const invBlock = (i) => {
+    if (!i.inv_type) return '';
+    const chips = [
+      i.inv_type,
+      i.inv_date ? fmtIso(i.inv_date) : '',
+      i.inv_qty != null ? 'Anzahl ' + fmtQty(i.inv_qty) : '',
+      i.inv_price != null ? 'Preis ' + fmtPrice(i.inv_price, i.currency) : ''
+    ].filter(Boolean).map((v) => `<span class="chip">${esc(v)}</span>`).join('');
+    const p = invPct(i);
+    return `<div class="invbox">
+      <div class="ih">● Investment getätigt</div>
+      <div class="invmeta">${chips}</div>
+      ${p != null ? `<div class="ir">Seit Kauf: ${pctHtml(p)}</div>` : ''}
+      ${i.inv_details ? `<div class="ir">${esc(i.inv_details)}</div>` : ''}
+      <div class="is">Begründung</div>
+      <div class="ir" style="margin-top:2px">${esc(i.inv_rationale || '')}</div>
+      ${i.inv_saved_at ? `<div class="is">Erstmals erfasst am ${esc(fmtFull(i.inv_saved_at))}</div>` : ''}
+    </div>`;
+  };
+  let invFor = null;
+  let invBack = false;
   let view = localStorage.getItem('view') === 'cards' ? 'cards' : 'dash';
   let detailId = null;
   let toastTimer;
@@ -75,24 +104,25 @@
 
   function render() {
     const q = $('q').value.trim().toLowerCase();
-    const fs = $('fSector').value, fr = $('fRegion').value;
+    const fs = $('fSector').value, fr = $('fRegion').value, fst = $('fStatus').value;
     const shown = sortedItems(items.filter((i) =>
-      (!q || (i.name + ' ' + i.symbol + ' ' + (i.notes || '')).toLowerCase().includes(q)) &&
-      (!fs || i.sector === fs) && (!fr || i.region === fr)));
+      (!q || (i.name + ' ' + i.symbol + ' ' + (i.notes || '') + ' ' + (i.inv_rationale || '')).toLowerCase().includes(q)) &&
+      (!fs || i.sector === fs) && (!fr || i.region === fr) &&
+      (!fst || (fst === 'inv') === !!i.inv_type)));
 
     $('dash').hidden = view !== 'dash';
     $('list').hidden = view !== 'cards';
     $('vDash').classList.toggle('on', view === 'dash');
     $('vCards').classList.toggle('on', view === 'cards');
 
-    const emptyHtml = `<div class="empty">${items.length ? 'Keine Treffer.' : 'Noch keine Kandidaten.<br>Tippe auf + um den ersten zu erfassen.'}</div>`;
+    const emptyHtml = `<div class="empty">${items.length ? 'Keine Treffer.' : 'Noch keine Candidates.<br>Tippe auf + um den ersten zu erfassen.'}</div>`;
 
     if (view === 'dash') {
       $('dash').innerHTML = !shown.length ? emptyHtml :
-        '<div class="dhead"><span>Kandidat</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
+        '<div class="dhead"><span>Candidate</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
         shown.map((i) => `
-        <div class="drow" data-id="${i.id}" role="button" tabindex="0">
-          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div></div>
+        <div class="drow${i.inv_type ? ' invested' : ''}" data-id="${i.id}" role="button" tabindex="0">
+          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}</div>
           <div class="dc"><div>${esc(fmtNum(i.entry_price))}</div><div class="sym">${esc(fmtShort(i.created_at))}</div></div>
           <div class="dc"><div>${esc(fmtNum(i.price))}</div><div class="sym">${esc(fmtShort(i.price_updated_at))}</div></div>
           <div class="dp">${pctHtml(pctOf(i))}</div>
@@ -111,9 +141,10 @@
         <div class="chips">
           ${[i.sector, i.country, i.region].filter(Boolean).map((v) => `<span class="chip">${esc(v)}</span>`).join('')}
         </div>
+        ${invBlock(i)}
         ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
         ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}
-        <div class="actions"><button type="button" data-act="edit">Bearbeiten</button><button type="button" class="del" data-act="del">Löschen</button></div>
+        <div class="actions"><button type="button" data-act="inv">${i.inv_type ? 'Investment bearbeiten' : 'Investment erfassen'}</button><button type="button" data-act="edit">Bearbeiten</button><button type="button" class="del" data-act="del">Löschen</button></div>
       </article>`).join('');
   }
 
@@ -122,6 +153,7 @@
     const i = items.find((x) => x.id === id);
     if (!i) return;
     detailId = id;
+    $('dInv').textContent = i.inv_type ? 'Investment bearbeiten' : 'Investment erfassen';
     $('detailBody').innerHTML = `
       <div class="name" style="font-size:20px">${esc(i.name)}</div>
       <div class="sym">${esc(i.symbol)}</div>
@@ -131,6 +163,7 @@
         <div class="dbox"><div class="lbl">Aktuell</div><div class="val">${esc(fmtNum(i.price))}</div><div class="sub">${i.price_updated_at ? esc(fmtDate(i.price_updated_at)) : ''}</div></div>
         <div class="dbox"><div class="lbl">Veränderung</div><div class="val">${pctHtml(pctOf(i))}</div><div class="sub">seit Erfassung</div></div>
       </div>
+      ${invBlock(i)}
       ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
       ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}`;
     $('detailDlg').showModal();
@@ -146,6 +179,11 @@
     if (r) openDetail(Number(r.dataset.id));
   });
   $('dClose').onclick = () => $('detailDlg').close();
+  $('dInv').onclick = () => {
+    const c = items.find((x) => x.id === detailId);
+    $('detailDlg').close();
+    if (c) openInv(c, true);
+  };
   $('dEdit').onclick = () => {
     const c = items.find((x) => x.id === detailId);
     $('detailDlg').close();
@@ -206,7 +244,7 @@
     editing = c || null;
     picked = null;
     $('err').textContent = '';
-    $('dlgTitle').textContent = c ? 'Kandidat bearbeiten' : 'Neuer Kandidat';
+    $('dlgTitle').textContent = c ? 'Candidate bearbeiten' : 'Neuer Candidate';
     $('searchBox').hidden = !!c;
     $('results').hidden = true;
     $('sq').value = '';
@@ -303,6 +341,61 @@
   $('addLink').onclick = () => addLinkRow();
   $('addBtn').onclick = () => openDialog(null);
 
+  // ---------- Investment erfassen ----------
+  function openInv(c, back) {
+    invFor = c;
+    invBack = !!back;
+    const has = !!c.inv_type;
+    $('invTitle').textContent = has ? 'Investment bearbeiten' : 'Investment erfassen';
+    $('invFor').textContent = `${c.name} (${c.symbol})`;
+    $('iType').value = c.inv_type || 'Kauf Titel';
+    $('iDate').value = c.inv_date ? String(c.inv_date).slice(0, 10) : todayIso();
+    $('iQty').value = c.inv_qty ?? '';
+    $('iPrice').value = has ? (c.inv_price ?? '') : (c.price ?? '');
+    $('iDet').value = c.inv_details || '';
+    $('iRat').value = c.inv_rationale || '';
+    $('iErr').textContent = '';
+    $('iDel').hidden = !has;
+    $('iSave').disabled = false;
+    $('invDlg').showModal();
+  }
+  function closeInv() {
+    $('invDlg').close();
+    if (invBack && invFor) openDetail(invFor.id);
+  }
+  $('iCancel').onclick = closeInv;
+  $('iDel').onclick = async () => {
+    if (!invFor || !confirm('Investment-Eintrag inklusive Begründung löschen?')) return;
+    try {
+      await api(`/candidates/${invFor.id}/investment`, { method: 'DELETE' });
+      await load();
+      closeInv();
+      toast('Investment entfernt');
+    } catch (e) { $('iErr').textContent = e.message; }
+  };
+  $('invForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const rationale = $('iRat').value.trim();
+    const price = parseNum($('iPrice').value), qty = parseNum($('iQty').value);
+    if (!rationale) { $('iErr').textContent = 'Bitte die Begründung erfassen.'; return; }
+    if (Number.isNaN(price) || Number.isNaN(qty)) { $('iErr').textContent = 'Preis oder Anzahl ist keine gültige Zahl.'; return; }
+    if (!$('iDate').value) { $('iErr').textContent = 'Bitte ein Datum wählen.'; return; }
+    $('iErr').textContent = '';
+    $('iSave').disabled = true;
+    try {
+      await api(`/candidates/${invFor.id}/investment`, {
+        method: 'PUT',
+        body: JSON.stringify({ type: $('iType').value, date: $('iDate').value, price, qty, details: $('iDet').value.trim(), rationale })
+      });
+      await load();
+      closeInv();
+      toast('Investment gespeichert');
+    } catch (e) {
+      $('iErr').textContent = e.message;
+      $('iSave').disabled = false;
+    }
+  });
+
   // ---------- Aktionen in der Liste ----------
   $('list').addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button[data-act]');
@@ -310,6 +403,7 @@
     const id = Number(btn.closest('.card').dataset.id);
     const c = items.find((i) => i.id === id);
     if (btn.dataset.act === 'edit') openDialog(c);
+    if (btn.dataset.act === 'inv') openInv(c, false);
     if (btn.dataset.act === 'del' && confirm(`«${c.name}» löschen?`)) {
       await api('/candidates/' + id, { method: 'DELETE' });
       await load();
@@ -327,7 +421,7 @@
     b.disabled = false; b.textContent = 'Kurse aktualisieren';
   };
 
-  ['q', 'fSector', 'fRegion', 'fSort'].forEach((id) => $(id).addEventListener('input', render));
+  ['q', 'fSector', 'fRegion', 'fStatus', 'fSort'].forEach((id) => $(id).addEventListener('input', render));
 
   // Kurse automatisch aktualisieren: beim Öffnen der App und wenn sie wieder in den Vordergrund kommt
   let lastAuto = 0;

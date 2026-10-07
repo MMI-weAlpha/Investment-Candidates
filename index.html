@@ -6,12 +6,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Kandidaten">
+<meta name="apple-mobile-web-app-title" content="Candidates">
 <meta name="theme-color" content="#f5f5f7">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<title>Kandidaten</title>
+<title>Candidates</title>
 <style>
   :root {
     --bg: #f5f5f7; --card: #fff; --text: #1c1c1e; --muted: #6e6e73; --line: #e3e3e8;
@@ -61,7 +61,7 @@
   .sheet { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }
   .sheet h2 { margin: 0; font-size: 20px; }
   label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
-  input[type=text], input[type=url], input[type=password], textarea, select.f {
+  input[type=text], input[type=url], input[type=password], input[type=date], textarea, select.f {
     width: 100%; border: 1px solid var(--line); background: var(--card); color: var(--text);
     border-radius: 10px; padding: 11px 12px; font-size: 16px; font-family: inherit; }
   textarea { min-height: 80px; resize: vertical; }
@@ -86,7 +86,7 @@
   .seg button { flex: 1; border: 0; background: none; color: var(--muted); border-radius: 8px; padding: 7px 0; font-size: 15px; }
   .seg button.on { background: var(--card); color: var(--text); font-weight: 600; }
   #dash { margin: 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-  .dhead, .drow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) 58px; gap: 8px; align-items: center; padding: 10px 14px; }
+  .dhead, .drow { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 1fr) 54px; gap: 8px; align-items: center; padding: 10px 14px; }
   .dhead { font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
   .dhead span:nth-child(2), .dhead span:nth-child(3), .dhead span:nth-child(4) { text-align: right; }
   .drow { border-bottom: 1px solid var(--line); cursor: pointer; }
@@ -101,28 +101,39 @@
   .dbox .lbl { color: var(--muted); font-size: 12px; }
   .dbox .val { font-size: 16px; font-weight: 600; margin: 2px 0; }
   .dbox .sub { color: var(--muted); font-size: 12px; }
+  :root { --ok: #1a8f3c; --okbg: #e8f5ec; }
+  @media (prefers-color-scheme: dark) { :root { --ok: #34c759; --okbg: #12301b; } }
+  .drow.invested { box-shadow: inset 3px 0 0 var(--ok); }
+  .inv { color: var(--ok); font-size: 12px; margin-top: 2px; line-height: 1.25; }
+  .invbox { margin-top: 14px; background: var(--okbg); border: 1px solid var(--ok); border-radius: 12px; padding: 12px; }
+  .invbox .ih { color: var(--ok); font-weight: 600; font-size: 14px; }
+  .invbox .invmeta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .invbox .ir { margin-top: 8px; white-space: pre-wrap; font-size: 15px; }
+  .invbox .is { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  input[type=date] { -webkit-appearance: none; appearance: none; min-height: 46px; text-align: left; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Kandidaten</h1>
+  <h1>Candidates</h1>
   <button class="iconbtn" id="refreshBtn" type="button">Kurse aktualisieren</button>
 </header>
-<div class="seg"><button type="button" id="vDash" class="on">Dashboard</button><button type="button" id="vCards">Karten</button></div>
+<div class="seg"><button type="button" id="vDash" class="on">Dashboard</button><button type="button" id="vCards">Details</button></div>
 <div class="filters">
   <input id="q" type="search" placeholder="Suchen…" aria-label="Suchen">
   <select id="fSector" aria-label="Sektor"><option value="">Sektor</option></select>
   <select id="fRegion" aria-label="Region"><option value="">Region</option></select>
+  <select id="fStatus" aria-label="Status"><option value="">Alle</option><option value="inv">Investiert</option><option value="watch">Nur beobachtet</option></select>
   <select id="fSort" aria-label="Sortierung"><option value="date">Neueste zuerst</option><option value="perf">Beste Performance</option><option value="name">Name A–Z</option></select>
 </div>
 <div id="dash"></div>
 <main id="list"></main>
-<button class="fab" id="addBtn" type="button" aria-label="Kandidat hinzufügen">+</button>
+<button class="fab" id="addBtn" type="button" aria-label="Candidate hinzufügen">+</button>
 <div id="toast"></div>
 
 <dialog id="dlg">
   <form class="sheet" id="form" method="dialog">
-    <h2 id="dlgTitle">Neuer Kandidat</h2>
+    <h2 id="dlgTitle">Neuer Candidate</h2>
 
     <div id="searchBox">
       <label for="sq">Name oder Ticker</label>
@@ -167,10 +178,39 @@
 <dialog id="detailDlg">
   <div class="sheet">
     <div id="detailBody"></div>
-    <button type="button" class="btn primary" id="dEdit">Bearbeiten</button>
+    <button type="button" class="btn primary" id="dInv">Investment erfassen</button>
+    <button type="button" class="btn secondary" id="dEdit">Candidate bearbeiten</button>
     <button type="button" class="btn secondary" id="dClose">Schliessen</button>
     <button type="button" class="btn secondary" id="dDel" style="color:var(--danger)">Löschen</button>
   </div>
+</dialog>
+
+<dialog id="invDlg">
+  <form class="sheet" id="invForm" method="dialog">
+    <h2 id="invTitle">Investment erfassen</h2>
+    <div class="hint" id="invFor"></div>
+    <div>
+      <label for="iType">Art des Investments</label>
+      <select class="f" id="iType">
+        <option>Kauf Titel</option><option>Kauf Option</option><option>Verkauf Option</option><option>Andere</option>
+      </select>
+    </div>
+    <div class="grid2">
+      <div><label for="iDate">Datum</label><input type="date" id="iDate"></div>
+      <div><label for="iQty">Anzahl</label><input type="text" id="iQty" inputmode="decimal" placeholder="z. B. 50"></div>
+    </div>
+    <div><label for="iPrice">Preis pro Stück / Kontrakt</label><input type="text" id="iPrice" inputmode="decimal"></div>
+    <div><label for="iDet">Details (optional, z. B. Strike und Verfall bei Optionen)</label><input type="text" id="iDet"></div>
+    <div>
+      <label for="iRat">Begründung: Warum ist dieses Investment rational?</label>
+      <textarea id="iRat" style="min-height:150px"></textarea>
+      <div class="hint">Tipp: These, Bewertung, Risiken und wann du wieder aussteigen würdest.</div>
+    </div>
+    <div class="err" id="iErr"></div>
+    <button type="submit" class="btn primary" id="iSave">Speichern</button>
+    <button type="button" class="btn secondary" id="iCancel">Abbrechen</button>
+    <button type="button" class="btn secondary" id="iDel" style="color:var(--danger)" hidden>Investment entfernen</button>
+  </form>
 </dialog>
 
 <dialog id="codeDlg">

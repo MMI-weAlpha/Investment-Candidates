@@ -1,4 +1,4 @@
-# Kandidaten – Investment-Ideen erfassen
+# Candidates – Investment-Ideen erfassen
 
 Kleine Web-App für den iPhone-Home-Bildschirm. Du gibst Name oder Ticker ein,
 die App holt Kurs, Sektor, Land und Region automatisch. Zu jedem Kandidaten
@@ -28,7 +28,9 @@ Die Tabelle wird beim ersten Start automatisch angelegt.
 - Der Kurs beim Erfassen wird als **Erfassungskurs** fix gespeichert und nie überschrieben.
 - Die Kurse werden automatisch aktualisiert, sobald du die App öffnest oder wieder in den Vordergrund holst (höchstens alle 2 Minuten).
 - «Kurse aktualisieren» holt den aktuellen Kurs und zeigt die Veränderung seit der Erfassung.
-- **Dashboard** (Standardansicht): Liste mit Datum, Erfassungskurs, aktuellem Kurs und Veränderung in %. Tippen auf einen Eintrag öffnet die Details. Umschalten auf «Karten» möglich, Sortierung nach Datum, Performance oder Name.
+- **Dashboard** (Standardansicht): Liste mit Datum, Erfassungskurs, aktuellem Kurs und Veränderung in %. Tippen auf einen Eintrag öffnet die Details. Umschalten auf «Details» möglich, Sortierung nach Datum, Performance oder Name.
+- **Investment erfassen:** In den Details (Eintrag im Dashboard antippen, oder Ansicht «Details») auf «Investment erfassen». Eingabe: Art (Kauf Titel, Kauf Option, Verkauf Option, Andere), Datum, Anzahl, Preis, optional Details (z. B. Strike/Verfall) und die **Begründung** (Pflicht). Der Zeitpunkt der ersten Erfassung der Begründung wird fix gespeichert.
+- Im Dashboard sind getätigte Investments grün markiert (mit Art und Datum). Filter «Investiert» / «Nur beobachtet».
 - Oben Suche und Filter nach Sektor und Region.
 
 ## Hinweise

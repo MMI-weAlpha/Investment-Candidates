@@ -1,6 +1,9 @@
 const express = require('express');
 const path = require('path');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// DATE-Spalten als Text «JJJJ-MM-TT» liefern (keine Zeitzonen-Verschiebung)
+types.setTypeParser(1082, (v) => v);
 const YahooFinance = require('yahoo-finance2').default;
 const { regionFor } = require('./regions');
 
@@ -37,13 +40,26 @@ async function initDb() {
   // Erfassungskurs: wird beim Anlegen einmal gespeichert und nie mehr überschrieben.
   await pool.query('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS entry_price NUMERIC');
   await pool.query('UPDATE candidates SET entry_price = price WHERE entry_price IS NULL');
+  // Getätigtes Investment inkl. Begründung (inv_type gesetzt = investiert)
+  await pool.query(`
+    ALTER TABLE candidates
+      ADD COLUMN IF NOT EXISTS inv_type TEXT,
+      ADD COLUMN IF NOT EXISTS inv_date DATE,
+      ADD COLUMN IF NOT EXISTS inv_price NUMERIC,
+      ADD COLUMN IF NOT EXISTS inv_qty NUMERIC,
+      ADD COLUMN IF NOT EXISTS inv_details TEXT,
+      ADD COLUMN IF NOT EXISTS inv_rationale TEXT,
+      ADD COLUMN IF NOT EXISTS inv_saved_at TIMESTAMPTZ
+  `);
 }
 
 function out(r) {
   return {
     ...r,
     price: r.price === null ? null : Number(r.price),
-    entry_price: r.entry_price === null ? null : Number(r.entry_price)
+    entry_price: r.entry_price === null ? null : Number(r.entry_price),
+    inv_price: r.inv_price == null ? null : Number(r.inv_price),
+    inv_qty: r.inv_qty == null ? null : Number(r.inv_qty)
   };
 }
 
@@ -142,6 +158,43 @@ app.delete('/api/candidates/:id', wrap(async (req, res) => {
   res.status(204).end();
 }));
 
+// --- Investment zu einem Candidate (Art, Datum, Preis, Anzahl, Begründung) ---
+const INV_TYPES = ['Kauf Titel', 'Kauf Option', 'Verkauf Option', 'Andere'];
+
+app.put('/api/candidates/:id/investment', wrap(async (req, res) => {
+  const b = req.body || {};
+  if (!INV_TYPES.includes(b.type)) return res.status(400).json({ error: 'Art des Investments fehlt oder ist ungültig' });
+  const rationale = String(b.rationale || '').trim();
+  if (!rationale) return res.status(400).json({ error: 'Bitte die Begründung erfassen' });
+  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const price = num(b.price), qty = num(b.qty);
+  if ((price !== null && (!Number.isFinite(price) || price < 0)) || (qty !== null && (!Number.isFinite(qty) || qty <= 0))) {
+    return res.status(400).json({ error: 'Preis oder Anzahl ungültig' });
+  }
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? b.date : null;
+  const { rows } = await pool.query(
+    `UPDATE candidates
+        SET inv_type=$2, inv_date=COALESCE($3::date, CURRENT_DATE), inv_price=$4, inv_qty=$5,
+            inv_details=$6, inv_rationale=$7, inv_saved_at=COALESCE(inv_saved_at, now())
+      WHERE id=$1 RETURNING *`,
+    [req.params.id, b.type, date, price, qty, String(b.details || '').trim() || null, rationale]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  res.json(out(rows[0]));
+}));
+
+app.delete('/api/candidates/:id/investment', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `UPDATE candidates
+        SET inv_type=NULL, inv_date=NULL, inv_price=NULL, inv_qty=NULL,
+            inv_details=NULL, inv_rationale=NULL, inv_saved_at=NULL
+      WHERE id=$1 RETURNING *`,
+    [req.params.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  res.json(out(rows[0]));
+}));
+
 // --- Kurse aller Kandidaten aktualisieren (ein gebündelter Abruf) ---
 app.post('/api/refresh', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT id, symbol FROM candidates');
@@ -188,7 +241,7 @@ if (fs.existsSync(path.join(publicDir, 'index.html'))) {
 
 const PORT = process.env.PORT || 3000;
 initDb()
-  .then(() => app.listen(PORT, () => console.log('Kandidaten läuft auf Port ' + PORT)))
+  .then(() => app.listen(PORT, () => console.log('Candidates läuft auf Port ' + PORT)))
   .catch((e) => {
     console.error('DB-Init fehlgeschlagen:', e.message);
     process.exit(1);
