@@ -125,7 +125,7 @@
         '<div class="dhead"><span>Candidate</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
         shown.map((i) => `
         <div class="drow${i.inv_type ? ' invested' : ''}" data-id="${i.id}" role="button" tabindex="0">
-          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}</div>
+          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}${window.marketFlags ? window.marketFlags(i) : ''}</div>
           <div class="dc"><div>${esc(fmtNum(i.entry_price))}</div><div class="sym">${esc(fmtShort(i.created_at))}</div></div>
           <div class="dc"><div>${esc(fmtNum(i.price))}</div><div class="sym">${esc(fmtShort(i.price_updated_at))}</div></div>
           <div class="dp">${pctHtml(pctOf(i))}</div>
@@ -448,6 +448,6 @@
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   const ready = load();
-  window.CandidatesApp = { api, esc, toast, getItems: () => items, ready };
+  window.CandidatesApp = { api, esc, toast, getItems: () => items, ready, rerender: () => render() };
   ready.then(autoRefresh);
 })();

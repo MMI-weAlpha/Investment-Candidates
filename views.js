@@ -86,6 +86,7 @@
     }
     renderBanner();
     if (page === 'views') renderViews();
+    if (A.rerender) A.rerender();
   }
 
   // ---------- Seitenwechsel ----------
@@ -367,6 +368,13 @@
     return `<div class="mhint"><div class="mh">${esc(heading)}</div>${list.map((v) => `
       <div class="mrow">${chip(v.stance)}<span>${esc(targetLabel(v.kind, v.target))} <span class="sm">· ${esc(v.kind === 'Gesamtmarkt' ? '' : v.kind + ' · ')}${esc(HORIZON_LABEL[v.horizon].toLowerCase())}${v.valid_until ? ' · bis ' + esc(fmtIso(v.valid_until)) : ''}${isExpired(v) ? ' · Überprüfung fällig' : ''}</span></span></div>`).join('')}
       <div class="sm" style="margin-top:6px">Begründungen im Tab «Marktsicht».</div></div>`;
+  };
+
+  // Kleines Label in der Dashboard-Zeile: Sektor/Land/Region über- oder untergewichtet
+  window.marketFlags = (c) => {
+    if (!views.length) return '';
+    const out = applicable(c).filter((v) => v.kind !== 'Gesamtmarkt' && (v.stance === 'Übergewichten' || v.stance === 'Untergewichten'));
+    return out.map((v) => `<div class="mflag ${v.stance === 'Untergewichten' ? 'bad' : 'ok'}">${v.stance === 'Untergewichten' ? '▼' : '▲'} ${esc(v.kind)} ${esc(targetLabel(v.kind, v.target))} ${v.stance === 'Untergewichten' ? 'untergewichtet' : 'übergewichtet'}</div>`).join('');
   };
 
   // ---------- Start ----------
