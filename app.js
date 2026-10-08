@@ -72,12 +72,15 @@
     return data;
   }
 
+  let codeWait = null;
   function askCode() {
-    return new Promise((resolve) => {
+    if (codeWait) return codeWait;
+    codeWait = new Promise((resolve) => {
       const dlg = $('codeDlg');
-      $('codeForm').onsubmit = () => { localStorage.setItem('accessCode', $('codeInput').value); resolve(); };
+      $('codeForm').onsubmit = () => { localStorage.setItem('accessCode', $('codeInput').value); codeWait = null; resolve(); };
       dlg.showModal();
     });
+    return codeWait;
   }
 
   // ---------- Liste ----------
@@ -164,6 +167,7 @@
         <div class="dbox"><div class="lbl">Veränderung</div><div class="val">${pctHtml(pctOf(i))}</div><div class="sub">seit Erfassung</div></div>
       </div>
       ${invBlock(i)}
+      ${window.marketHints ? window.marketHints(i, 'Marktsicht-Abgleich') : ''}
       ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
       ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}`;
     $('detailDlg').showModal();
@@ -348,6 +352,7 @@
     const has = !!c.inv_type;
     $('invTitle').textContent = has ? 'Investment bearbeiten' : 'Investment erfassen';
     $('invFor').textContent = `${c.name} (${c.symbol})`;
+    $('invHints').innerHTML = window.marketHints ? window.marketHints(c, 'Marktsicht zum Zeitpunkt der Entscheidung') : '';
     $('iType').value = c.inv_type || 'Kauf Titel';
     $('iDate').value = c.inv_date ? String(c.inv_date).slice(0, 10) : todayIso();
     $('iQty').value = c.inv_qty ?? '';
@@ -442,5 +447,7 @@
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoRefresh(); });
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  load().then(autoRefresh);
+  const ready = load();
+  window.CandidatesApp = { api, esc, toast, getItems: () => items, ready };
+  ready.then(autoRefresh);
 })();

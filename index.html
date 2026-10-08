@@ -23,7 +23,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
-  body { padding: env(safe-area-inset-top) 0 calc(90px + env(safe-area-inset-bottom)); }
+  body { padding: env(safe-area-inset-top) 0 calc(150px + env(safe-area-inset-bottom)); }
   header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 14px 16px 8px;
     display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h1 { font-size: 28px; margin: 0; letter-spacing: -0.5px; }
@@ -52,7 +52,7 @@
   .actions button { border: 0; background: none; color: var(--accent); font-size: 15px; padding: 4px 0; }
   .actions .del { color: var(--danger); }
   .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
-  .fab { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom)); width: 58px; height: 58px;
+  .fab { position: fixed; right: 18px; bottom: calc(76px + env(safe-area-inset-bottom)); width: 58px; height: 58px;
     border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 32px; line-height: 1;
     box-shadow: 0 6px 18px rgba(0,0,0,.25); }
   dialog { width: min(560px, 100%); max-height: 100%; margin: auto auto 0; border: 0; border-radius: 20px 20px 0 0;
@@ -79,7 +79,7 @@
   .btn:disabled { opacity: .5; }
   .hint { color: var(--muted); font-size: 13px; }
   .err { color: var(--danger); font-size: 14px; }
-  #toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  #toast { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translateX(-50%);
     background: #000c; color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 14px; display: none; z-index: 20; }
   [hidden] { display: none !important; }
   .seg { display: flex; margin: 0 16px 10px; background: var(--chip); border-radius: 10px; padding: 3px; }
@@ -111,13 +111,58 @@
   .invbox .ir { margin-top: 8px; white-space: pre-wrap; font-size: 15px; }
   .invbox .is { color: var(--muted); font-size: 12px; margin-top: 8px; }
   input[type=date] { -webkit-appearance: none; appearance: none; min-height: 46px; text-align: left; }
+  :root { --warn: #a15c00; --warnbg: #fff3de; --badbg: #fdeceb; }
+  @media (prefers-color-scheme: dark) { :root { --warn: #ffb340; --warnbg: #3a2a0a; --badbg: #3a1512; } }
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+  .tabbar button { flex: 1; border: 0; background: none; color: var(--muted); padding: 8px 0 6px; font-size: 11px; display: grid; justify-items: center; gap: 2px; }
+  .tabbar button.on { color: var(--accent); font-weight: 600; }
+  .tabbar svg { width: 24px; height: 24px; }
+  .banner { margin: 0 16px 10px; padding: 10px 12px; border-radius: 12px; font-size: 14px; border: 1px solid var(--line); background: var(--chip); cursor: pointer; }
+  .banner.t-warn { background: var(--warnbg); border-color: var(--warn); }
+  .banner.t-ok { background: var(--okbg); border-color: var(--ok); }
+  .banner.t-bad { background: var(--badbg); border-color: var(--danger); }
+  #viewsPage { padding: 0 16px; }
+  .vsec { margin-bottom: 22px; }
+  .vh { display: flex; align-items: baseline; gap: 8px; margin: 6px 2px 8px; font-size: 20px; font-weight: 600; }
+  .vh small { color: var(--muted); font-size: 13px; font-weight: 400; }
+  .stance { border-radius: 16px; padding: 14px 16px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+  .stance .sl { color: var(--muted); font-size: 12px; }
+  .stance .sv { font-size: 24px; font-weight: 700; margin: 2px 0; }
+  .stance .ss { font-size: 14px; }
+  .stance .sr { margin-top: 8px; font-size: 15px; white-space: pre-wrap; }
+  .stance.t-warn { background: var(--warnbg); border-color: var(--warn); } .stance.t-warn .sv { color: var(--warn); }
+  .stance.t-ok { background: var(--okbg); border-color: var(--ok); } .stance.t-ok .sv { color: var(--ok); }
+  .stance.t-bad { background: var(--badbg); border-color: var(--danger); } .stance.t-bad .sv { color: var(--danger); }
+  .stance.empty { cursor: default; text-align: center; color: var(--muted); }
+  .vlist { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-top: 10px; }
+  .vgrp { padding: 8px 14px 4px; font-size: 12px; color: var(--muted); }
+  .vrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 14px; border-top: 1px solid var(--line); cursor: pointer; }
+  .vgrp + .vrow, .vlist > .vrow:first-child { border-top: 0; }
+  .vrow:active { background: var(--chip); }
+  .vt { min-width: 0; } .vt .name { font-size: 15px; font-weight: 500; }
+  .vr { text-align: right; flex: none; }
+  .wt { color: var(--warn); }
+  .sc { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .sc.t-ok { background: var(--okbg); color: var(--ok); }
+  .sc.t-bad { background: var(--badbg); color: var(--danger); }
+  .sc.t-warn { background: var(--warnbg); color: var(--warn); }
+  .sc.t-neu { background: var(--chip); color: var(--text); }
+  .mhint { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); }
+  .mhint .mh { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .mrow { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 3px 0; }
+  .sm { color: var(--muted); font-size: 12px; }
+  details.vsec summary { cursor: pointer; font-size: 17px; font-weight: 600; padding: 6px 2px; }
+  .qrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .qbtn { border: 0; background: var(--chip); color: var(--text); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Candidates</h1>
+  <h1 id="pageTitle">Candidates</h1>
   <button class="iconbtn" id="refreshBtn" type="button">Kurse aktualisieren</button>
 </header>
+<div id="candPage">
+<div id="stanceBanner" class="banner" hidden></div>
 <div class="seg"><button type="button" id="vDash" class="on">Dashboard</button><button type="button" id="vCards">Details</button></div>
 <div class="filters">
   <input id="q" type="search" placeholder="Suchen…" aria-label="Suchen">
@@ -128,8 +173,36 @@
 </div>
 <div id="dash"></div>
 <main id="list"></main>
+</div>
+
+<div id="viewsPage" hidden>
+  <div class="vsec">
+    <div class="vh"><span>Taktisch</span><small>1–3 Monate</small></div>
+    <div id="vTactMain"></div>
+    <div id="vTactList"></div>
+  </div>
+  <div class="vsec">
+    <div class="vh"><span>Strategisch</span><small>12+ Monate</small></div>
+    <div id="vStratList"></div>
+  </div>
+  <details class="vsec" id="vHist">
+    <summary id="vHistSum">Verlauf</summary>
+    <div id="vHistList"></div>
+  </details>
+</div>
 <button class="fab" id="addBtn" type="button" aria-label="Candidate hinzufügen">+</button>
 <div id="toast"></div>
+
+<nav class="tabbar" aria-label="Bereiche">
+  <button type="button" id="tabCand" class="on">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+    Candidates
+  </button>
+  <button type="button" id="tabViews">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+    Marktsicht
+  </button>
+</nav>
 
 <dialog id="dlg">
   <form class="sheet" id="form" method="dialog">
@@ -189,6 +262,7 @@
   <form class="sheet" id="invForm" method="dialog">
     <h2 id="invTitle">Investment erfassen</h2>
     <div class="hint" id="invFor"></div>
+    <div id="invHints"></div>
     <div>
       <label for="iType">Art des Investments</label>
       <select class="f" id="iType">
@@ -213,6 +287,47 @@
   </form>
 </dialog>
 
+<dialog id="vwDlg">
+  <form class="sheet" id="vwForm" method="dialog">
+    <h2 id="vwTitle">Neue Einschätzung</h2>
+    <div class="seg" style="margin:0" id="vwHorizon">
+      <button type="button" data-h="taktisch" class="on">Taktisch (1–3 Mt.)</button>
+      <button type="button" data-h="strategisch">Strategisch (12+ Mt.)</button>
+    </div>
+    <div><label for="vwKind">Gegenstand</label><select class="f" id="vwKind"></select></div>
+    <div id="vwTargetBox"><label for="vwTarget" id="vwTargetLbl">Region</label><select class="f" id="vwTarget"></select></div>
+    <div>
+      <label for="vwStance">Einschätzung</label>
+      <select class="f" id="vwStance"></select>
+      <div class="hint" id="vwStanceHint"></div>
+    </div>
+    <div>
+      <label for="vwUntil" id="vwUntilLbl">Gültig bis</label>
+      <input type="date" id="vwUntil">
+      <div class="qrow" id="vwQuick"></div>
+    </div>
+    <div>
+      <label for="vwRat">Begründung</label>
+      <textarea id="vwRat" style="min-height:130px"></textarea>
+      <div class="hint">Tipp: Was spricht dafür, was dagegen, woran erkennst du, dass du falsch liegst?</div>
+    </div>
+    <div class="hint" id="vwNote"></div>
+    <div class="err" id="vwErr"></div>
+    <button type="submit" class="btn primary" id="vwSave">Speichern</button>
+    <button type="button" class="btn secondary" id="vwCancel">Abbrechen</button>
+  </form>
+</dialog>
+
+<dialog id="vdDlg">
+  <div class="sheet">
+    <div id="vdBody"></div>
+    <button type="button" class="btn primary" id="vdNew">Neue Einschätzung dazu</button>
+    <button type="button" class="btn secondary" id="vdEnd">Einschätzung beenden</button>
+    <button type="button" class="btn secondary" id="vdClose">Schliessen</button>
+    <button type="button" class="btn secondary" id="vdDel" style="color:var(--danger)">Löschen</button>
+  </div>
+</dialog>
+
 <dialog id="codeDlg">
   <form class="sheet" id="codeForm" method="dialog">
     <h2>Zugangscode</h2>
@@ -223,5 +338,6 @@
 </dialog>
 
 <script src="/app.js"></script>
+<script src="/views.js"></script>
 </body>
 </html>
