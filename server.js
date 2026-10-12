@@ -275,6 +275,32 @@ app.delete('/api/views/:id', wrap(async (req, res) => {
 }));
 
 // --- Kurse aller Kandidaten aktualisieren (ein gebündelter Abruf) ---
+// Aktuellster Kurs je Titel: Chart-Abfrage (liefert Kurs + Zeitstempel der Börse),
+// mit Rückfall auf die gebündelte Quote-Abfrage. Es gewinnt der neuere Zeitstempel.
+async function latestPrice(symbol, quoteMap) {
+  const cands = [];
+  try {
+    const ch = await yahooFinance.chart(symbol, {
+      period1: new Date(Date.now() - 7 * 86400000), interval: '1d'
+    });
+    const m = ch && ch.meta;
+    if (m && m.regularMarketPrice != null) {
+      cands.push({ src: 'chart', price: m.regularMarketPrice, currency: m.currency || null,
+        time: m.regularMarketTime ? new Date(m.regularMarketTime).getTime() : 0 });
+    }
+  } catch (e) {
+    console.error('chart ' + symbol + ': ' + e.message);
+  }
+  const q = quoteMap.get(symbol);
+  if (q && q.regularMarketPrice != null) {
+    cands.push({ src: 'quote', price: q.regularMarketPrice, currency: q.currency || null,
+      time: q.regularMarketTime ? new Date(q.regularMarketTime).getTime() : 0 });
+  }
+  if (!cands.length) return null;
+  cands.sort((x, y) => y.time - x.time);
+  return cands;
+}
+
 app.post('/api/refresh', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT id, symbol FROM candidates');
   if (!rows.length) return res.json({ updated: 0, total: 0 });
@@ -284,17 +310,24 @@ app.post('/api/refresh', wrap(async (_req, res) => {
     quotes = await yahooFinance.quote(symbols);
   } catch (e) {
     console.error('Gebündelter Kursabruf fehlgeschlagen:', e.message);
-    const single = await Promise.allSettled(symbols.map((sym) => yahooFinance.quote(sym)));
-    quotes = single.filter((x) => x.status === 'fulfilled' && x.value).map((x) => x.value);
   }
-  const bySymbol = new Map(quotes.map((q) => [q.symbol, q]));
+  const quoteMap = new Map((Array.isArray(quotes) ? quotes : [quotes]).filter(Boolean).map((q) => [q.symbol, q]));
+  const best = new Map();
+  const results = await Promise.allSettled(symbols.map(async (sym) => [sym, await latestPrice(sym, quoteMap)]));
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value[1]) {
+      const [sym, c] = r.value;
+      best.set(sym, c[0]);
+      console.log('Kurs ' + sym + ': ' + c.map((x) => x.src + '=' + x.price + '@' + (x.time ? new Date(x.time).toISOString() : '?')).join(' | '));
+    }
+  }
   let updated = 0;
   for (const r of rows) {
-    const q = bySymbol.get(r.symbol);
-    if (q && q.regularMarketPrice != null) {
+    const c = best.get(r.symbol);
+    if (c) {
       await pool.query(
         'UPDATE candidates SET price=$2, currency=COALESCE($3,currency), price_updated_at=now() WHERE id=$1',
-        [r.id, q.regularMarketPrice, q.currency || null]
+        [r.id, c.price, c.currency]
       );
       updated++;
     }
