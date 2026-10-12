@@ -51,6 +51,21 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS inv_rationale TEXT,
       ADD COLUMN IF NOT EXISTS inv_saved_at TIMESTAMPTZ
   `);
+  // Marktsicht (neu in v2): eigene Tabelle, berührt die Candidates nicht
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS market_views (
+      id SERIAL PRIMARY KEY,
+      horizon TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      target TEXT,
+      stance TEXT NOT NULL,
+      valid_from DATE NOT NULL DEFAULT CURRENT_DATE,
+      valid_until DATE,
+      rationale TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ended_at TIMESTAMPTZ
+    )
+  `);
 }
 
 function out(r) {
@@ -195,7 +210,97 @@ app.delete('/api/candidates/:id/investment', wrap(async (req, res) => {
   res.json(out(rows[0]));
 }));
 
+// --- Marktsicht: taktische (1–3 Monate) und strategische (12+ Monate) Einschätzungen ---
+const HORIZONS = ['taktisch', 'strategisch'];
+const KINDS = ['Gesamtmarkt', 'Region', 'Land', 'Sektor'];
+const TILT = ['Übergewichten', 'Neutral', 'Untergewichten'];
+const STANCES = {
+  Gesamtmarkt: ['Abwarten', 'Selektiv investieren', 'Investieren', 'Risiko reduzieren'],
+  Region: TILT, Land: TILT, Sektor: TILT
+};
+const isoDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+
+app.get('/api/views', wrap(async (_req, res) => {
+  const { rows } = await pool.query('SELECT * FROM market_views ORDER BY created_at DESC, id DESC');
+  res.json(rows);
+}));
+
+// Neue Einschätzung: eine bestehende, aktive zum gleichen Gegenstand wird beendet (bleibt im Verlauf)
+app.post('/api/views', wrap(async (req, res) => {
+  const b = req.body || {};
+  if (!HORIZONS.includes(b.horizon)) return res.status(400).json({ error: 'Horizont fehlt oder ist ungültig' });
+  if (!KINDS.includes(b.kind)) return res.status(400).json({ error: 'Gegenstand fehlt oder ist ungültig' });
+  if (b.kind === 'Gesamtmarkt' && b.horizon !== 'taktisch') return res.status(400).json({ error: 'Gesamtmarkt gibt es nur taktisch' });
+  if (!STANCES[b.kind].includes(b.stance)) return res.status(400).json({ error: 'Einschätzung ist ungültig' });
+  const target = b.kind === 'Gesamtmarkt' ? null : String(b.target || '').trim();
+  if (b.kind !== 'Gesamtmarkt' && !target) return res.status(400).json({ error: 'Bitte ' + b.kind + ' wählen' });
+  const rationale = String(b.rationale || '').trim();
+  if (!rationale) return res.status(400).json({ error: 'Bitte die Begründung erfassen' });
+  const from = isoDate(b.valid_from), until = isoDate(b.valid_until);
+  if (from && until && until < from) return res.status(400).json({ error: '«Gültig bis» liegt vor dem Beginn' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE market_views SET ended_at = now()
+        WHERE ended_at IS NULL AND horizon=$1 AND kind=$2 AND COALESCE(target,'')=$3`,
+      [b.horizon, b.kind, target || '']
+    );
+    const { rows } = await client.query(
+      `INSERT INTO market_views (horizon, kind, target, stance, valid_from, valid_until, rationale)
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6::date,$7) RETURNING *`,
+      [b.horizon, b.kind, target, b.stance, from, until, rationale]
+    );
+    await client.query('COMMIT');
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}));
+
+app.post('/api/views/:id/end', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    'UPDATE market_views SET ended_at = COALESCE(ended_at, now()) WHERE id=$1 RETURNING *', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  res.json(rows[0]);
+}));
+
+app.delete('/api/views/:id', wrap(async (req, res) => {
+  await pool.query('DELETE FROM market_views WHERE id=$1', [req.params.id]);
+  res.status(204).end();
+}));
+
 // --- Kurse aller Kandidaten aktualisieren (ein gebündelter Abruf) ---
+// Aktuellster Kurs je Titel: Chart-Abfrage (liefert Kurs + Zeitstempel der Börse),
+// mit Rückfall auf die gebündelte Quote-Abfrage. Es gewinnt der neuere Zeitstempel.
+async function latestPrice(symbol, quoteMap) {
+  const cands = [];
+  try {
+    const ch = await yahooFinance.chart(symbol, {
+      period1: new Date(Date.now() - 7 * 86400000), interval: '1d'
+    });
+    const m = ch && ch.meta;
+    if (m && m.regularMarketPrice != null) {
+      cands.push({ src: 'chart', price: m.regularMarketPrice, currency: m.currency || null,
+        time: m.regularMarketTime ? new Date(m.regularMarketTime).getTime() : 0 });
+    }
+  } catch (e) {
+    console.error('chart ' + symbol + ': ' + e.message);
+  }
+  const q = quoteMap.get(symbol);
+  if (q && q.regularMarketPrice != null) {
+    cands.push({ src: 'quote', price: q.regularMarketPrice, currency: q.currency || null,
+      time: q.regularMarketTime ? new Date(q.regularMarketTime).getTime() : 0 });
+  }
+  if (!cands.length) return null;
+  cands.sort((x, y) => y.time - x.time);
+  return cands;
+}
+
 app.post('/api/refresh', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT id, symbol FROM candidates');
   if (!rows.length) return res.json({ updated: 0, total: 0 });
@@ -205,17 +310,24 @@ app.post('/api/refresh', wrap(async (_req, res) => {
     quotes = await yahooFinance.quote(symbols);
   } catch (e) {
     console.error('Gebündelter Kursabruf fehlgeschlagen:', e.message);
-    const single = await Promise.allSettled(symbols.map((sym) => yahooFinance.quote(sym)));
-    quotes = single.filter((x) => x.status === 'fulfilled' && x.value).map((x) => x.value);
   }
-  const bySymbol = new Map(quotes.map((q) => [q.symbol, q]));
+  const quoteMap = new Map((Array.isArray(quotes) ? quotes : [quotes]).filter(Boolean).map((q) => [q.symbol, q]));
+  const best = new Map();
+  const results = await Promise.allSettled(symbols.map(async (sym) => [sym, await latestPrice(sym, quoteMap)]));
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value[1]) {
+      const [sym, c] = r.value;
+      best.set(sym, c[0]);
+      console.log('Kurs ' + sym + ': ' + c.map((x) => x.src + '=' + x.price + '@' + (x.time ? new Date(x.time).toISOString() : '?')).join(' | '));
+    }
+  }
   let updated = 0;
   for (const r of rows) {
-    const q = bySymbol.get(r.symbol);
-    if (q && q.regularMarketPrice != null) {
+    const c = best.get(r.symbol);
+    if (c) {
       await pool.query(
         'UPDATE candidates SET price=$2, currency=COALESCE($3,currency), price_updated_at=now() WHERE id=$1',
-        [r.id, q.regularMarketPrice, q.currency || null]
+        [r.id, c.price, c.currency]
       );
       updated++;
     }
@@ -231,7 +343,7 @@ const publicDir = path.join(__dirname, 'public');
 if (fs.existsSync(path.join(publicDir, 'index.html'))) {
   app.use(express.static(publicDir));
 } else {
-  const FILES = ['index.html', 'app.js', 'manifest.json', 'sw.js', 'icon.svg', 'apple-touch-icon.png'];
+  const FILES = ['index.html', 'app.js', 'views.js', 'manifest.json', 'sw.js', 'icon.svg', 'apple-touch-icon.png'];
   console.log('Ordner public nicht gefunden, liefere Dateien aus dem Hauptverzeichnis aus.');
   app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
   for (const f of FILES) {
