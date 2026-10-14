@@ -220,16 +220,23 @@
       <div style="margin-top:10px">${chip(v.stance)} ${ended ? '<span class="chip">beendet</span>' : exp ? '<span class="sc t-warn">Überprüfung fällig</span>' : ''}</div>
       <div class="sym" style="margin-top:10px">${esc(STANCE_HINT[v.stance] || '')}</div>
       <div class="sym" style="margin-top:6px">Gültig ab ${esc(fmtIso(v.valid_from))}${v.valid_until ? ' bis ' + esc(fmtIso(v.valid_until)) : ''}</div>
-      <div class="sym">Erfasst am ${esc(fmtTs(v.created_at))}${ended ? ' · beendet am ' + esc(fmtTs(v.ended_at)) : ''}</div>
+      <div class="sym">Erfasst am ${esc(fmtTs(v.created_at))}${v.edited_at ? ' · bearbeitet am ' + esc(fmtTs(v.edited_at)) : ''}${ended ? ' · beendet am ' + esc(fmtTs(v.ended_at)) : ''}</div>
       <div class="sm" style="margin-top:12px">Begründung</div>
       <div class="notes" style="margin-top:2px">${esc(v.rationale)}</div>
       ${v.kind !== 'Gesamtmarkt' ? `<div class="mhint"><div class="mh">Betroffene Candidates (${cands.length})</div>${
         cands.length ? cands.map((c) => `<div class="mrow"><span>${c.inv_type ? '<span style="color:var(--ok)">●</span> ' : ''}${esc(c.name)}</span><span class="sm">${esc(c.symbol)}</span></div>`).join('')
           : '<div class="sym">Keine Candidates in diesem Bereich.</div>'}</div>` : ''}`;
     $('vdEnd').hidden = ended;
+    $('vdEdit').hidden = ended;
     $('vdDlg').showModal();
   }
 
+  $('vdEdit').onclick = () => {
+    const v = current;
+    if (!v) return;
+    $('vdDlg').close();
+    openVe(v);
+  };
   $('vdClose').onclick = () => $('vdDlg').close();
   $('vdNew').onclick = () => {
     const v = current;
@@ -302,7 +309,30 @@
     updateNote();
   }
 
+  let editingId = null;
+  const lockForm = (on) => {
+    $('vwKind').disabled = on;
+    $('vwTarget').disabled = on;
+    $('vwHorizon').style.opacity = on ? '.5' : '';
+  };
+
+  // Bearbeiten: Einschätzung, «Gültig bis» und Begründung; Gegenstand/Horizont bleiben fix
+  function openVe(v) {
+    editingId = v.id;
+    setHorizon(v.horizon, { kind: v.kind, target: v.target, stance: v.stance });
+    $('vwTitle').textContent = 'Einschätzung bearbeiten';
+    lockForm(true);
+    $('vwUntil').value = v.valid_until || '';
+    $('vwRat').value = v.rationale || '';
+    $('vwNote').textContent = 'Gegenstand und Horizont lassen sich nicht ändern. Für eine andere Sicht lege eine neue Einschätzung an, die alte bleibt dann im Verlauf.';
+    $('vwErr').textContent = '';
+    $('vwSave').disabled = false;
+    $('vwDlg').showModal();
+  }
+
   function openVw(pre = {}) {
+    editingId = null;
+    lockForm(false);
     $('vwTitle').textContent = pre.kind ? 'Neue Einschätzung dazu' : 'Neue Einschätzung';
     const h = pre.horizon || 'taktisch';
     setHorizon(h, { ...pre, kind: pre.kind || (h === 'taktisch' ? 'Gesamtmarkt' : 'Region') });
@@ -314,7 +344,7 @@
 
   $('vwHorizon').addEventListener('click', (ev) => {
     const b = ev.target.closest('button[data-h]');
-    if (b && b.dataset.h !== horizon) setHorizon(b.dataset.h);
+    if (!editingId && b && b.dataset.h !== horizon) setHorizon(b.dataset.h);
   });
   $('vwKind').addEventListener('change', () => { fillTarget(); fillStance(); updateNote(); });
   $('vwTarget').addEventListener('change', updateNote);
@@ -329,6 +359,20 @@
     ev.preventDefault();
     const rationale = $('vwRat').value.trim();
     if (!rationale) { $('vwErr').textContent = 'Bitte die Begründung erfassen.'; return; }
+    if (editingId) {
+      const upd = { stance: $('vwStance').value, valid_until: $('vwUntil').value || null, rationale };
+      $('vwSave').disabled = true;
+      try {
+        await api('/views/' + editingId, { method: 'PUT', body: JSON.stringify(upd) });
+        await loadViews();
+        $('vwDlg').close();
+        toast('Einschätzung aktualisiert');
+      } catch (e) {
+        $('vwErr').textContent = e.message;
+        $('vwSave').disabled = false;
+      }
+      return;
+    }
     const body = {
       horizon, kind: $('vwKind').value, target: currentTarget(), stance: $('vwStance').value,
       valid_from: todayIso(), valid_until: $('vwUntil').value || null, rationale

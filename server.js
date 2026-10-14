@@ -66,6 +66,7 @@ async function initDb() {
       ended_at TIMESTAMPTZ
     )
   `);
+  await pool.query('ALTER TABLE market_views ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ');
 }
 
 function out(r) {
@@ -260,6 +261,29 @@ app.post('/api/views', wrap(async (req, res) => {
   } finally {
     client.release();
   }
+}));
+
+// Bearbeiten: Einschätzung, «Gültig bis» und Begründung einer aktiven Einschätzung.
+// Gegenstand und Horizont bleiben fix (sonst gäbe es eine neue Einschätzung).
+app.put('/api/views/:id', wrap(async (req, res) => {
+  const b = req.body || {};
+  const cur = await pool.query('SELECT * FROM market_views WHERE id=$1', [req.params.id]);
+  if (!cur.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  const v = cur.rows[0];
+  if (v.ended_at) return res.status(409).json({ error: 'Beendete Einschätzungen sind nur im Verlauf einsehbar' });
+  if (!STANCES[v.kind].includes(b.stance)) return res.status(400).json({ error: 'Einschätzung ist ungültig' });
+  const rationale = String(b.rationale || '').trim();
+  if (!rationale) return res.status(400).json({ error: 'Bitte die Begründung erfassen' });
+  const until = b.valid_until ? isoDate(b.valid_until) : null;
+  if (b.valid_until && !until) return res.status(400).json({ error: '«Gültig bis» ist ungültig' });
+  const fromIso = v.valid_from instanceof Date ? v.valid_from.toISOString().slice(0, 10) : String(v.valid_from).slice(0, 10);
+  if (until && until < fromIso) return res.status(400).json({ error: '«Gültig bis» liegt vor dem Beginn' });
+  const { rows } = await pool.query(
+    `UPDATE market_views SET stance=$2, valid_until=$3::date, rationale=$4, edited_at=now()
+      WHERE id=$1 RETURNING *`,
+    [req.params.id, b.stance, until, rationale]
+  );
+  res.json(rows[0]);
 }));
 
 app.post('/api/views/:id/end', wrap(async (req, res) => {
