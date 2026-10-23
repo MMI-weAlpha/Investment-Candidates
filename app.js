@@ -72,12 +72,15 @@
     return data;
   }
 
+  let codeWait = null;
   function askCode() {
-    return new Promise((resolve) => {
+    if (codeWait) return codeWait;
+    codeWait = new Promise((resolve) => {
       const dlg = $('codeDlg');
-      $('codeForm').onsubmit = () => { localStorage.setItem('accessCode', $('codeInput').value); resolve(); };
+      $('codeForm').onsubmit = () => { localStorage.setItem('accessCode', $('codeInput').value); codeWait = null; resolve(); };
       dlg.showModal();
     });
+    return codeWait;
   }
 
   // ---------- Liste ----------
@@ -122,7 +125,7 @@
         '<div class="dhead"><span>Candidate</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
         shown.map((i) => `
         <div class="drow${i.inv_type ? ' invested' : ''}" data-id="${i.id}" role="button" tabindex="0">
-          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}</div>
+          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}${window.marketFlags ? window.marketFlags(i) : ''}</div>
           <div class="dc"><div>${esc(fmtNum(i.entry_price))}</div><div class="sym">${esc(fmtShort(i.created_at))}</div></div>
           <div class="dc"><div>${esc(fmtNum(i.price))}</div><div class="sym">${esc(fmtShort(i.price_updated_at))}</div></div>
           <div class="dp">${pctHtml(pctOf(i))}</div>
@@ -164,6 +167,7 @@
         <div class="dbox"><div class="lbl">Veränderung</div><div class="val">${pctHtml(pctOf(i))}</div><div class="sub">seit Erfassung</div></div>
       </div>
       ${invBlock(i)}
+      ${window.marketHints ? window.marketHints(i, 'Marktsicht-Abgleich') : ''}
       ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
       ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}`;
     $('detailDlg').showModal();
@@ -308,6 +312,7 @@
       $('fc').value = d.country || '';
       setRegionOptions(d.region || '');
       $('save').disabled = false;
+      if (d.partial) $('err').textContent = 'Yahoo liefert gerade nur Teildaten. Bitte Sektor, Land und Region prüfen und bei Bedarf von Hand ergänzen.';
     } catch (e) {
       picked = null;
       $('pPrice').textContent = '';
@@ -348,6 +353,7 @@
     const has = !!c.inv_type;
     $('invTitle').textContent = has ? 'Investment bearbeiten' : 'Investment erfassen';
     $('invFor').textContent = `${c.name} (${c.symbol})`;
+    $('invHints').innerHTML = window.marketHints ? window.marketHints(c, 'Marktsicht zum Zeitpunkt der Entscheidung') : '';
     $('iType').value = c.inv_type || 'Kauf Titel';
     $('iDate').value = c.inv_date ? String(c.inv_date).slice(0, 10) : todayIso();
     $('iQty').value = c.inv_qty ?? '';
@@ -442,5 +448,7 @@
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoRefresh(); });
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  load().then(autoRefresh);
+  const ready = load();
+  window.CandidatesApp = { api, esc, toast, getItems: () => items, ready, rerender: () => render() };
+  ready.then(autoRefresh);
 })();

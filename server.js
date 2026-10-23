@@ -66,6 +66,7 @@ async function initDb() {
       ended_at TIMESTAMPTZ
     )
   `);
+  await pool.query('ALTER TABLE market_views ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ');
 }
 
 function out(r) {
@@ -108,20 +109,66 @@ app.get('/api/search', wrap(async (req, res) => {
 }));
 
 // --- Details zu einem Ticker: Preis, Sektor, Land, Region ---
+// Land aus der Börsenendung (Rückfall, wenn Yahoo die Details drosselt)
+const SUFFIX_COUNTRY = {
+  SW: 'Switzerland', DE: 'Germany', F: 'Germany', PA: 'France', AS: 'Netherlands', BR: 'Belgium',
+  MI: 'Italy', MC: 'Spain', L: 'United Kingdom', ST: 'Sweden', CO: 'Denmark', HE: 'Finland',
+  OL: 'Norway', VI: 'Austria', LS: 'Portugal', T: 'Japan', HK: 'Hong Kong', AX: 'Australia',
+  TO: 'Canada', KS: 'South Korea', TW: 'Taiwan', SI: 'Singapore'
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function lookup(symbol) {
-  const s = await yahooFinance.quoteSummary(symbol, { modules: ['price', 'assetProfile'] });
-  const p = s.price || {};
-  const a = s.assetProfile || {};
-  const country = a.country || null;
-  return {
-    symbol: p.symbol || symbol,
-    name: p.longName || p.shortName || symbol,
-    price: p.regularMarketPrice ?? null,
-    currency: p.currency || null,
-    sector: a.sector || (p.quoteType === 'ETF' ? 'ETF' : null),
-    country,
-    region: regionFor(country)
-  };
+  // 1) vollständige Details (braucht bei Yahoo einen «crumb», wird manchmal mit 429 gedrosselt)
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const s = await yahooFinance.quoteSummary(symbol, { modules: ['price', 'assetProfile'] });
+      const p = s.price || {};
+      const a = s.assetProfile || {};
+      const country = a.country || null;
+      return {
+        symbol: p.symbol || symbol,
+        name: p.longName || p.shortName || symbol,
+        price: p.regularMarketPrice ?? null,
+        currency: p.currency || null,
+        sector: a.sector || (p.quoteType === 'ETF' ? 'ETF' : null),
+        country,
+        region: regionFor(country)
+      };
+    } catch (e) {
+      lastErr = e;
+      console.error('quoteSummary ' + symbol + ': ' + e.message);
+      if (attempt === 0) await sleep(1200);
+    }
+  }
+  // 2) Rückfall: Kurs über die Chart-Abfrage, Name/Sektor aus der Suche, Land aus der Börsenendung
+  let price = null, currency = null, name = symbol;
+  try {
+    const ch = await yahooFinance.chart(symbol, { period1: new Date(Date.now() - 7 * 86400000), interval: '1d' });
+    if (ch && ch.meta) {
+      price = ch.meta.regularMarketPrice ?? null;
+      currency = ch.meta.currency || null;
+      name = ch.meta.longName || ch.meta.shortName || name;
+    }
+  } catch (e) {
+    console.error('chart ' + symbol + ': ' + e.message);
+  }
+  let sector = null;
+  try {
+    const r = await yahooFinance.search(symbol, { quotesCount: 6, newsCount: 0 });
+    const hit = (r.quotes || []).find((x) => x.symbol === symbol);
+    if (hit) {
+      name = hit.longname || hit.shortname || name;
+      sector = hit.sector || hit.sectorDisp || (hit.quoteType === 'ETF' ? 'ETF' : null);
+    }
+  } catch (e) {
+    console.error('search ' + symbol + ': ' + e.message);
+  }
+  if (price === null && name === symbol) throw lastErr || new Error('Keine Daten von Yahoo erhalten');
+  const suffix = symbol.includes('.') ? symbol.split('.').pop().toUpperCase() : '';
+  const country = suffix ? (SUFFIX_COUNTRY[suffix] || null) : (sector === 'ETF' ? null : 'United States');
+  return { symbol, name, price, currency, sector, country, region: regionFor(country), partial: true };
 }
 
 app.get('/api/lookup', wrap(async (req, res) => {
@@ -260,6 +307,29 @@ app.post('/api/views', wrap(async (req, res) => {
   } finally {
     client.release();
   }
+}));
+
+// Bearbeiten: Einschätzung, «Gültig bis» und Begründung einer aktiven Einschätzung.
+// Gegenstand und Horizont bleiben fix (sonst gäbe es eine neue Einschätzung).
+app.put('/api/views/:id', wrap(async (req, res) => {
+  const b = req.body || {};
+  const cur = await pool.query('SELECT * FROM market_views WHERE id=$1', [req.params.id]);
+  if (!cur.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  const v = cur.rows[0];
+  if (v.ended_at) return res.status(409).json({ error: 'Beendete Einschätzungen sind nur im Verlauf einsehbar' });
+  if (!STANCES[v.kind].includes(b.stance)) return res.status(400).json({ error: 'Einschätzung ist ungültig' });
+  const rationale = String(b.rationale || '').trim();
+  if (!rationale) return res.status(400).json({ error: 'Bitte die Begründung erfassen' });
+  const until = b.valid_until ? isoDate(b.valid_until) : null;
+  if (b.valid_until && !until) return res.status(400).json({ error: '«Gültig bis» ist ungültig' });
+  const fromIso = v.valid_from instanceof Date ? v.valid_from.toISOString().slice(0, 10) : String(v.valid_from).slice(0, 10);
+  if (until && until < fromIso) return res.status(400).json({ error: '«Gültig bis» liegt vor dem Beginn' });
+  const { rows } = await pool.query(
+    `UPDATE market_views SET stance=$2, valid_until=$3::date, rationale=$4, edited_at=now()
+      WHERE id=$1 RETURNING *`,
+    [req.params.id, b.stance, until, rationale]
+  );
+  res.json(rows[0]);
 }));
 
 app.post('/api/views/:id/end', wrap(async (req, res) => {
