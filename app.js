@@ -312,6 +312,7 @@
       $('fc').value = d.country || '';
       setRegionOptions(d.region || '');
       $('save').disabled = false;
+      if (d.partial) $('err').textContent = 'Yahoo liefert gerade nur Teildaten. Bitte Sektor, Land und Region prüfen und bei Bedarf von Hand ergänzen.';
     } catch (e) {
       picked = null;
       $('pPrice').textContent = '';
