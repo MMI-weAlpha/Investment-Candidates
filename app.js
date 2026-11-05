@@ -43,7 +43,7 @@
     return `<div class="invbox">
       <div class="ih">● Investment getätigt</div>
       <div class="invmeta">${chips}</div>
-      ${p != null ? `<div class="ir">Seit Kauf: ${pctHtml(p)}</div>` : ''}
+      ${p != null ? `<div class="ir" style="font-size:17px;margin:6px 0 2px">Rendite seit Kauf ${pctHtml(p)}</div><div class="is" style="margin-top:0">${esc(fmtPrice(i.inv_price, i.currency))} → ${esc(fmtPrice(i.price, i.currency))} · ohne Dividenden und Gebühren</div>` : ''}
       ${i.inv_details ? `<div class="ir">${esc(i.inv_details)}</div>` : ''}
       <div class="is">Begründung</div>
       <div class="ir" style="margin-top:2px">${esc(i.inv_rationale || '')}</div>
@@ -125,7 +125,7 @@
         '<div class="dhead"><span>Candidate</span><span>Erfasst</span><span>Aktuell</span><span>%</span></div>' +
         shown.map((i) => `
         <div class="drow${i.inv_type ? ' invested' : ''}" data-id="${i.id}" role="button" tabindex="0">
-          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}${window.marketFlags ? window.marketFlags(i) : ''}</div>
+          <div class="dn"><div class="name">${esc(i.name)}</div><div class="sym">${esc(i.symbol)}${i.currency ? ' · ' + esc(i.currency) : ''}</div>${i.inv_type ? `<div class="inv">● ${esc(i.inv_type)} · ${esc(fmtIsoShort(i.inv_date))}</div>` : ''}${invPct(i) != null ? `<div class="invp">Seit Kauf ${pctHtml(invPct(i))}</div>` : ''}${window.marketFlags ? window.marketFlags(i) : ''}</div>
           <div class="dc"><div>${esc(fmtNum(i.entry_price))}</div><div class="sym">${esc(fmtShort(i.created_at))}</div></div>
           <div class="dc"><div>${esc(fmtNum(i.price))}</div><div class="sym">${esc(fmtShort(i.price_updated_at))}</div></div>
           <div class="dp">${pctHtml(pctOf(i))}</div>
