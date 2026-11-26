@@ -139,47 +139,70 @@ const num = (v) => {
 };
 const ratio = (a, b) => (a !== null && b !== null && a > 0 && b > 0 ? Math.round((a / b) * 100) / 100 : null);
 
-async function valuation(symbol, s) {
-  // Zusatzdaten getrennt abfragen: Schlägt das fehl, bleiben Kurs, Sektor und Land trotzdem erhalten
-  let x = {};
-  try {
-    x = await yahooFinance.quoteSummary(symbol, {
-      modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData']
-    }, { validateResult: false });
-  } catch (e) {
-    console.error('Kennzahlen ' + symbol + ': ' + e.message);
-  }
-  let q = {};
-  try {
-    const r = await yahooFinance.quote(symbol, {}, { validateResult: false });
-    q = (Array.isArray(r) ? r[0] : r) || {};
-  } catch (e) {
-    console.error('quote ' + symbol + ': ' + e.message);
-  }
-  const p = s.price || {}, sd = x.summaryDetail || {}, ks = x.defaultKeyStatistics || {}, fd = x.financialData || {};
-  const price = num(p.regularMarketPrice) ?? num(q.regularMarketPrice);
-  const marketCap = num(sd.marketCap) ?? num(p.marketCap) ?? num(q.marketCap);
-  const pe = num(sd.trailingPE) ?? num(q.trailingPE) ?? ratio(price, num(ks.trailingEps) ?? num(q.epsTrailingTwelveMonths));
-  const pb = num(ks.priceToBook) ?? num(q.priceToBook);
-  const pfcf = ratio(marketCap, num(fd.freeCashflow));
-  // EBIT (letzte 12 Monate) aus den Fundamentaldaten, falls verfügbar
-  let ebit = null;
+// Kennzahlen ohne Yahoo-«crumb»: aus den Geschäftszahlen (Fundamentaldaten) und dem aktuellen Kurs berechnet.
+// Die Fundamentaldaten-Abfrage braucht keinen Zugangsschlüssel und wird deshalb auch bei Drosselung (429) nicht blockiert.
+async function fundamentalRows(symbol, type, module) {
   try {
     const rows = await yahooFinance.fundamentalsTimeSeries(symbol, {
-      period1: new Date(Date.now() - 800 * 86400000), type: 'trailing', module: 'financials'
+      period1: new Date(Date.now() - 900 * 86400000), type, module
     }, { validateResult: false });
-    const last = [...(rows || [])].reverse().find((r) => num(r.trailingEBIT) !== null);
-    if (last) ebit = num(last.trailingEBIT);
+    return Array.isArray(rows) ? rows : [];
   } catch (e) {
-    console.error('EBIT ' + symbol + ': ' + e.message);
+    console.error('Fundamentaldaten ' + module + ' ' + symbol + ': ' + e.message);
+    return [];
   }
-  const evEbit = ratio(num(ks.enterpriseValue), ebit);
-  const out = {
-    val_pe: pe !== null && pe > 0 ? Math.round(pe * 100) / 100 : null,
-    val_pb: pb !== null && pb > 0 ? Math.round(pb * 100) / 100 : null,
-    val_pfcf: pfcf, val_ev_ebit: evEbit
+}
+const lastWith = (rows, key) => [...rows].reverse().find((r) => num(r[key]) !== null) || {};
+
+async function computedValuation(symbol, price) {
+  const [fin, cf, bs] = await Promise.all([
+    fundamentalRows(symbol, 'trailing', 'financials'),
+    fundamentalRows(symbol, 'trailing', 'cash-flow'),
+    fundamentalRows(symbol, 'quarterly', 'balance-sheet')
+  ]);
+  const eps = num(lastWith(fin, 'dilutedEPS').dilutedEPS) ?? num(lastWith(fin, 'basicEPS').basicEPS);
+  const ebit = num(lastWith(fin, 'EBIT').EBIT);
+  const fcf = num(lastWith(cf, 'freeCashFlow').freeCashFlow);
+  const equity = num(lastWith(bs, 'commonStockEquity').commonStockEquity) ?? num(lastWith(bs, 'stockholdersEquity').stockholdersEquity);
+  const shares = num(lastWith(bs, 'ordinarySharesNumber').ordinarySharesNumber) ?? num(lastWith(bs, 'shareIssued').shareIssued);
+  const debt = num(lastWith(bs, 'totalDebt').totalDebt);
+  const cash = num(lastWith(bs, 'cashAndCashEquivalents').cashAndCashEquivalents) ?? 0;
+  const marketCap = price !== null && shares !== null ? price * shares : null;
+  const ev = marketCap !== null && debt !== null ? marketCap + debt - cash : null;
+  return {
+    pe: ratio(price, eps), pb: ratio(marketCap, equity), pfcf: ratio(marketCap, fcf), evEbit: ratio(ev, ebit)
   };
-  console.log('Kennzahlen ' + symbol + ': ' + JSON.stringify(out));
+}
+
+// Bewertungskennzahlen: bevorzugt Yahoos eigene Werte (wenn der crumb verfügbar ist), sonst berechnet
+async function valuation(symbol, s, price) {
+  let x = {};
+  if (s) {
+    try {
+      x = await yahooFinance.quoteSummary(symbol, {
+        modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData']
+      }, { validateResult: false });
+    } catch (e) {
+      console.error('Kennzahlen ' + symbol + ': ' + e.message);
+    }
+  }
+  const p = (s && s.price) || {}, sd = x.summaryDetail || {}, ks = x.defaultKeyStatistics || {}, fd = x.financialData || {};
+  const px = price ?? num(p.regularMarketPrice);
+  const marketCapY = num(sd.marketCap) ?? num(p.marketCap);
+  const y = {
+    pe: num(sd.trailingPE) ?? ratio(px, num(ks.trailingEps)),
+    pb: num(ks.priceToBook),
+    pfcf: ratio(marketCapY, num(fd.freeCashflow)),
+    evEbit: null
+  };
+  const c = await computedValuation(symbol, px);
+  const pick = (a, b) => (a !== null && a > 0 ? a : b !== null && b > 0 ? b : null);
+  const round = (v) => (v === null ? null : Math.round(v * 100) / 100);
+  const out = {
+    val_pe: round(pick(y.pe, c.pe)), val_pb: round(pick(y.pb, c.pb)),
+    val_pfcf: round(pick(y.pfcf, c.pfcf)), val_ev_ebit: round(pick(y.evEbit, c.evEbit))
+  };
+  console.log('Kennzahlen ' + symbol + ': ' + JSON.stringify(out) + ' (Yahoo ' + JSON.stringify(y) + ', berechnet ' + JSON.stringify(c) + ')');
   return out;
 }
 
@@ -192,7 +215,7 @@ async function lookup(symbol) {
       const p = s.price || {};
       const a = s.assetProfile || {};
       const country = a.country || null;
-      const val = await valuation(symbol, s);
+      const val = await valuation(symbol, s, num(p.regularMarketPrice));
       return {
         ...val,
         symbol: p.symbol || symbol,
@@ -235,7 +258,8 @@ async function lookup(symbol) {
   if (price === null && name === symbol) throw lastErr || new Error('Keine Daten von Yahoo erhalten');
   const suffix = symbol.includes('.') ? symbol.split('.').pop().toUpperCase() : '';
   const country = suffix ? (SUFFIX_COUNTRY[suffix] || null) : (sector === 'ETF' ? null : 'United States');
-  return { symbol, name, price, currency, sector, country, region: regionFor(country), partial: true };
+  const val = await valuation(symbol, null, price);
+  return { ...val, symbol, name, price, currency, sector, country, region: regionFor(country), partial: true };
 }
 
 app.get('/api/lookup', wrap(async (req, res) => {
