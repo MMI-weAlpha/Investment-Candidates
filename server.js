@@ -140,29 +140,47 @@ const num = (v) => {
 const ratio = (a, b) => (a !== null && b !== null && a > 0 && b > 0 ? Math.round((a / b) * 100) / 100 : null);
 
 async function valuation(symbol, s) {
-  const p = s.price || {}, sd = s.summaryDetail || {}, ks = s.defaultKeyStatistics || {}, fd = s.financialData || {};
-  const price = num(p.regularMarketPrice);
-  const marketCap = num(sd.marketCap) ?? num(p.marketCap);
-  const pe = num(sd.trailingPE) ?? ratio(price, num(ks.trailingEps));
-  const pb = num(ks.priceToBook);
+  // Zusatzdaten getrennt abfragen: Schlägt das fehl, bleiben Kurs, Sektor und Land trotzdem erhalten
+  let x = {};
+  try {
+    x = await yahooFinance.quoteSummary(symbol, {
+      modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData']
+    }, { validateResult: false });
+  } catch (e) {
+    console.error('Kennzahlen ' + symbol + ': ' + e.message);
+  }
+  let q = {};
+  try {
+    const r = await yahooFinance.quote(symbol, {}, { validateResult: false });
+    q = (Array.isArray(r) ? r[0] : r) || {};
+  } catch (e) {
+    console.error('quote ' + symbol + ': ' + e.message);
+  }
+  const p = s.price || {}, sd = x.summaryDetail || {}, ks = x.defaultKeyStatistics || {}, fd = x.financialData || {};
+  const price = num(p.regularMarketPrice) ?? num(q.regularMarketPrice);
+  const marketCap = num(sd.marketCap) ?? num(p.marketCap) ?? num(q.marketCap);
+  const pe = num(sd.trailingPE) ?? num(q.trailingPE) ?? ratio(price, num(ks.trailingEps) ?? num(q.epsTrailingTwelveMonths));
+  const pb = num(ks.priceToBook) ?? num(q.priceToBook);
   const pfcf = ratio(marketCap, num(fd.freeCashflow));
   // EBIT (letzte 12 Monate) aus den Fundamentaldaten, falls verfügbar
   let ebit = null;
   try {
     const rows = await yahooFinance.fundamentalsTimeSeries(symbol, {
       period1: new Date(Date.now() - 800 * 86400000), type: 'trailing', module: 'financials'
-    });
+    }, { validateResult: false });
     const last = [...(rows || [])].reverse().find((r) => num(r.trailingEBIT) !== null);
     if (last) ebit = num(last.trailingEBIT);
   } catch (e) {
     console.error('EBIT ' + symbol + ': ' + e.message);
   }
   const evEbit = ratio(num(ks.enterpriseValue), ebit);
-  return {
+  const out = {
     val_pe: pe !== null && pe > 0 ? Math.round(pe * 100) / 100 : null,
     val_pb: pb !== null && pb > 0 ? Math.round(pb * 100) / 100 : null,
     val_pfcf: pfcf, val_ev_ebit: evEbit
   };
+  console.log('Kennzahlen ' + symbol + ': ' + JSON.stringify(out));
+  return out;
 }
 
 async function lookup(symbol) {
@@ -170,9 +188,7 @@ async function lookup(symbol) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const s = await yahooFinance.quoteSummary(symbol, {
-        modules: ['price', 'assetProfile', 'summaryDetail', 'defaultKeyStatistics', 'financialData']
-      });
+      const s = await yahooFinance.quoteSummary(symbol, { modules: ['price', 'assetProfile'] });
       const p = s.price || {};
       const a = s.assetProfile || {};
       const country = a.country || null;
