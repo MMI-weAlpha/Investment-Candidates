@@ -40,6 +40,15 @@ async function initDb() {
   // Erfassungskurs: wird beim Anlegen einmal gespeichert und nie mehr überschrieben.
   await pool.query('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS entry_price NUMERIC');
   await pool.query('UPDATE candidates SET entry_price = price WHERE entry_price IS NULL');
+  // Bewertungskennzahlen zum Zeitpunkt der Aufnahme (fix gespeichert, bei Bedarf von Hand korrigierbar)
+  await pool.query(`
+    ALTER TABLE candidates
+      ADD COLUMN IF NOT EXISTS val_pe NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_pb NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_pfcf NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_ev_ebit NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_saved_at TIMESTAMPTZ
+  `);
   // Getätigtes Investment inkl. Begründung (inv_type gesetzt = investiert)
   await pool.query(`
     ALTER TABLE candidates
@@ -75,7 +84,11 @@ function out(r) {
     price: r.price === null ? null : Number(r.price),
     entry_price: r.entry_price === null ? null : Number(r.entry_price),
     inv_price: r.inv_price == null ? null : Number(r.inv_price),
-    inv_qty: r.inv_qty == null ? null : Number(r.inv_qty)
+    inv_qty: r.inv_qty == null ? null : Number(r.inv_qty),
+    val_pe: r.val_pe == null ? null : Number(r.val_pe),
+    val_pb: r.val_pb == null ? null : Number(r.val_pb),
+    val_pfcf: r.val_pfcf == null ? null : Number(r.val_pfcf),
+    val_ev_ebit: r.val_ev_ebit == null ? null : Number(r.val_ev_ebit)
   };
 }
 
@@ -118,16 +131,54 @@ const SUFFIX_COUNTRY = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Bewertungskennzahlen aus den Yahoo-Daten (nur sinnvolle, positive Werte; sonst null)
+const num = (v) => {
+  if (v && typeof v === 'object' && 'raw' in v) v = v.raw;
+  const n = Number(v);
+  return v === null || v === undefined || v === '' || !Number.isFinite(n) ? null : n;
+};
+const ratio = (a, b) => (a !== null && b !== null && a > 0 && b > 0 ? Math.round((a / b) * 100) / 100 : null);
+
+async function valuation(symbol, s) {
+  const p = s.price || {}, sd = s.summaryDetail || {}, ks = s.defaultKeyStatistics || {}, fd = s.financialData || {};
+  const price = num(p.regularMarketPrice);
+  const marketCap = num(sd.marketCap) ?? num(p.marketCap);
+  const pe = num(sd.trailingPE) ?? ratio(price, num(ks.trailingEps));
+  const pb = num(ks.priceToBook);
+  const pfcf = ratio(marketCap, num(fd.freeCashflow));
+  // EBIT (letzte 12 Monate) aus den Fundamentaldaten, falls verfügbar
+  let ebit = null;
+  try {
+    const rows = await yahooFinance.fundamentalsTimeSeries(symbol, {
+      period1: new Date(Date.now() - 800 * 86400000), type: 'trailing', module: 'financials'
+    });
+    const last = [...(rows || [])].reverse().find((r) => num(r.trailingEBIT) !== null);
+    if (last) ebit = num(last.trailingEBIT);
+  } catch (e) {
+    console.error('EBIT ' + symbol + ': ' + e.message);
+  }
+  const evEbit = ratio(num(ks.enterpriseValue), ebit);
+  return {
+    val_pe: pe !== null && pe > 0 ? Math.round(pe * 100) / 100 : null,
+    val_pb: pb !== null && pb > 0 ? Math.round(pb * 100) / 100 : null,
+    val_pfcf: pfcf, val_ev_ebit: evEbit
+  };
+}
+
 async function lookup(symbol) {
   // 1) vollständige Details (braucht bei Yahoo einen «crumb», wird manchmal mit 429 gedrosselt)
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const s = await yahooFinance.quoteSummary(symbol, { modules: ['price', 'assetProfile'] });
+      const s = await yahooFinance.quoteSummary(symbol, {
+        modules: ['price', 'assetProfile', 'summaryDetail', 'defaultKeyStatistics', 'financialData']
+      });
       const p = s.price || {};
       const a = s.assetProfile || {};
       const country = a.country || null;
+      const val = await valuation(symbol, s);
       return {
+        ...val,
         symbol: p.symbol || symbol,
         name: p.longName || p.shortName || symbol,
         price: p.regularMarketPrice ?? null,
@@ -185,6 +236,10 @@ function cleanLinks(links) {
     .filter((l) => /^https?:\/\//i.test(l.url));
 }
 
+// Kennzahlen aus dem Request: leer/ungültig = unbekannt (null)
+const valNum = (v) => { const n = num(typeof v === 'string' ? v.trim().replace(',', '.') : v); return n === null ? null : Math.round(n * 100) / 100; };
+const valParams = (b) => [valNum(b.val_pe), valNum(b.val_pb), valNum(b.val_pfcf), valNum(b.val_ev_ebit)];
+
 app.get('/api/candidates', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM candidates ORDER BY created_at DESC');
   res.json(rows.map(out));
@@ -194,11 +249,14 @@ app.post('/api/candidates', wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.symbol || !b.name) return res.status(400).json({ error: 'Name und Ticker erforderlich' });
   const { rows } = await pool.query(
-    `INSERT INTO candidates (symbol, name, price, entry_price, currency, sector, country, region, notes, links, price_updated_at)
-     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END)
+    `INSERT INTO candidates (symbol, name, price, entry_price, currency, sector, country, region, notes, links, price_updated_at,
+                             val_pe, val_pb, val_pfcf, val_ev_ebit, val_saved_at)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END,
+             $10::numeric,$11::numeric,$12::numeric,$13::numeric, CASE WHEN COALESCE($10::numeric,$11::numeric,$12::numeric,$13::numeric) IS NULL THEN NULL ELSE now() END)
      RETURNING *`,
     [b.symbol, b.name, b.price ?? null, b.currency || null, b.sector || null, b.country || null,
-     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
+     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links)),
+     ...valParams(b)]
   );
   res.status(201).json(out(rows[0]));
 }));
@@ -206,10 +264,13 @@ app.post('/api/candidates', wrap(async (req, res) => {
 app.put('/api/candidates/:id', wrap(async (req, res) => {
   const b = req.body || {};
   const { rows } = await pool.query(
-    `UPDATE candidates SET name=$2, sector=$3, country=$4, region=$5, notes=$6, links=$7
+    `UPDATE candidates SET name=$2, sector=$3, country=$4, region=$5, notes=$6, links=$7,
+            val_pe=$8::numeric, val_pb=$9::numeric, val_pfcf=$10::numeric, val_ev_ebit=$11::numeric,
+            val_saved_at = CASE WHEN COALESCE($8::numeric,$9::numeric,$10::numeric,$11::numeric) IS NULL THEN NULL ELSE COALESCE(val_saved_at, now()) END
      WHERE id=$1 RETURNING *`,
     [req.params.id, b.name, b.sector || null, b.country || null,
-     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
+     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links)),
+     ...valParams(b)]
   );
   if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
   res.json(out(rows[0]));

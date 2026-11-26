@@ -21,6 +21,24 @@
   };
   const pctOf = (i) => (i.entry_price != null && i.price != null && Number(i.entry_price) !== 0) ? (i.price / i.entry_price - 1) * 100 : null;
   const pctHtml = (p) => p == null ? '<span class="muted">–</span>' : `<b class="${p >= 0 ? 'pos' : 'neg'}">${p >= 0 ? '+' : ''}${p.toFixed(1)}%</b>`;
+  const fmtRatio = (v, d = 1) => v == null ? '–' : new Intl.NumberFormat('de-CH', { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
+  const hasVal = (i) => [i.val_pe, i.val_pb, i.val_pfcf, i.val_ev_ebit].some((v) => v != null);
+  // Bewertung zum Zeitpunkt der Aufnahme (fix gespeichert)
+  const valBlock = (i) => !hasVal(i) ? '' : `<div class="vbox"><div class="vh">Bewertung bei Aufnahme${i.val_saved_at ? ' · ' + esc(fmtDay(i.val_saved_at)) : ''}</div>
+    <div class="vrow">
+      <div class="vcell"><div class="vl">P/E</div><div class="vv">${fmtRatio(i.val_pe)}</div></div>
+      <div class="vcell"><div class="vl">P/B</div><div class="vv">${fmtRatio(i.val_pb, 2)}</div></div>
+      <div class="vcell"><div class="vl">MW/FCF</div><div class="vv">${fmtRatio(i.val_pfcf)}</div></div>
+      <div class="vcell"><div class="vl">EV/EBIT</div><div class="vv">${fmtRatio(i.val_ev_ebit)}</div></div>
+    </div></div>`;
+  const setVal = (o) => {
+    $('vPe').value = o?.val_pe ?? ''; $('vPb').value = o?.val_pb ?? '';
+    $('vPfcf').value = o?.val_pfcf ?? ''; $('vEv').value = o?.val_ev_ebit ?? '';
+  };
+  const readVal = () => {
+    const f = (id) => { const n = parseNum($(id).value); return n === null || Number.isNaN(n) ? null : n; };
+    return { val_pe: f('vPe'), val_pb: f('vPb'), val_pfcf: f('vPfcf'), val_ev_ebit: f('vEv') };
+  };
   const fmtNum = (p) => p == null ? '–' : new Intl.NumberFormat('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p);
   const fmtShort = (d) => d ? new Date(d).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
   const fmtIso = (d) => d ? d.slice(8, 10) + '.' + d.slice(5, 7) + '.' + d.slice(0, 4) : '';
@@ -144,6 +162,7 @@
         <div class="chips">
           ${[i.sector, i.country, i.region].filter(Boolean).map((v) => `<span class="chip">${esc(v)}</span>`).join('')}
         </div>
+        ${valBlock(i)}
         ${invBlock(i)}
         ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
         ${(i.links || []).length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.title || host(l.url))}</a>`).join('')}</div>` : ''}
@@ -166,6 +185,7 @@
         <div class="dbox"><div class="lbl">Aktuell</div><div class="val">${esc(fmtNum(i.price))}</div><div class="sub">${i.price_updated_at ? esc(fmtDate(i.price_updated_at)) : ''}</div></div>
         <div class="dbox"><div class="lbl">Veränderung</div><div class="val">${pctHtml(pctOf(i))}</div><div class="sub">seit Erfassung</div></div>
       </div>
+      ${valBlock(i)}
       ${invBlock(i)}
       ${window.marketHints ? window.marketHints(i, 'Marktsicht-Abgleich') : ''}
       ${i.notes ? `<div class="notes">${esc(i.notes)}</div>` : ''}
@@ -264,6 +284,11 @@
     setRegionOptions(c?.region || '');
     $('fn').value = c?.notes || '';
     renderLinks(c?.links || []);
+    setVal(c);
+    $('vLoad').hidden = !c;
+    $('vHint').textContent = c
+      ? 'Zum Zeitpunkt der Aufnahme fix gespeichert. Fehlende Werte kannst du von Hand eintragen oder die heutigen Werte laden (sie ersetzen dann die Felder oben, nicht den Zeitpunkt der Aufnahme).'
+      : 'Wird beim Erfassen von Yahoo gefüllt und fix gespeichert. Fehlt ein Wert, kannst du ihn von Hand eintragen.';
     $('save').disabled = !c;
     $('dlg').showModal();
     if (!c) setTimeout(() => $('sq').focus(), 50);
@@ -311,6 +336,7 @@
       $('fs').value = d.sector || '';
       $('fc').value = d.country || '';
       setRegionOptions(d.region || '');
+      setVal(d);
       $('save').disabled = false;
       if (d.partial) $('err').textContent = 'Yahoo liefert gerade nur Teildaten. Bitte Sektor, Land und Region prüfen und bei Bedarf von Hand ergänzen.';
     } catch (e) {
@@ -326,7 +352,7 @@
     $('err').textContent = '';
     const body = {
       sector: $('fs').value.trim(), country: $('fc').value.trim(), region: $('fr').value,
-      notes: $('fn').value.trim(), links: collectLinks()
+      notes: $('fn').value.trim(), links: collectLinks(), ...readVal()
     };
     try {
       if (editing) {
@@ -342,6 +368,20 @@
       $('save').disabled = false;
     }
   });
+  $('vLoad').onclick = async () => {
+    if (!editing) return;
+    $('vLoad').disabled = true; $('err').textContent = '';
+    try {
+      const d = await api('/lookup?symbol=' + encodeURIComponent(editing.symbol));
+      if ([d.val_pe, d.val_pb, d.val_pfcf, d.val_ev_ebit].every((v) => v == null)) {
+        $('err').textContent = 'Yahoo liefert für diesen Titel gerade keine Kennzahlen.';
+      } else {
+        setVal(d);
+        toast('Heutige Werte geladen, bitte speichern');
+      }
+    } catch (e) { $('err').textContent = e.message; }
+    $('vLoad').disabled = false;
+  };
   $('cancel').onclick = () => $('dlg').close();
   $('addLink').onclick = () => addLinkRow();
   $('addBtn').onclick = () => openDialog(null);
