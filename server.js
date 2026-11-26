@@ -40,6 +40,15 @@ async function initDb() {
   // Erfassungskurs: wird beim Anlegen einmal gespeichert und nie mehr überschrieben.
   await pool.query('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS entry_price NUMERIC');
   await pool.query('UPDATE candidates SET entry_price = price WHERE entry_price IS NULL');
+  // Bewertungskennzahlen zum Zeitpunkt der Aufnahme (fix gespeichert, bei Bedarf von Hand korrigierbar)
+  await pool.query(`
+    ALTER TABLE candidates
+      ADD COLUMN IF NOT EXISTS val_pe NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_pb NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_pfcf NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_ev_ebit NUMERIC,
+      ADD COLUMN IF NOT EXISTS val_saved_at TIMESTAMPTZ
+  `);
   // Getätigtes Investment inkl. Begründung (inv_type gesetzt = investiert)
   await pool.query(`
     ALTER TABLE candidates
@@ -75,7 +84,11 @@ function out(r) {
     price: r.price === null ? null : Number(r.price),
     entry_price: r.entry_price === null ? null : Number(r.entry_price),
     inv_price: r.inv_price == null ? null : Number(r.inv_price),
-    inv_qty: r.inv_qty == null ? null : Number(r.inv_qty)
+    inv_qty: r.inv_qty == null ? null : Number(r.inv_qty),
+    val_pe: r.val_pe == null ? null : Number(r.val_pe),
+    val_pb: r.val_pb == null ? null : Number(r.val_pb),
+    val_pfcf: r.val_pfcf == null ? null : Number(r.val_pfcf),
+    val_ev_ebit: r.val_ev_ebit == null ? null : Number(r.val_ev_ebit)
   };
 }
 
@@ -118,6 +131,81 @@ const SUFFIX_COUNTRY = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Bewertungskennzahlen aus den Yahoo-Daten (nur sinnvolle, positive Werte; sonst null)
+const num = (v) => {
+  if (v && typeof v === 'object' && 'raw' in v) v = v.raw;
+  const n = Number(v);
+  return v === null || v === undefined || v === '' || !Number.isFinite(n) ? null : n;
+};
+const ratio = (a, b) => (a !== null && b !== null && a > 0 && b > 0 ? Math.round((a / b) * 100) / 100 : null);
+
+// Kennzahlen ohne Yahoo-«crumb»: aus den Geschäftszahlen (Fundamentaldaten) und dem aktuellen Kurs berechnet.
+// Die Fundamentaldaten-Abfrage braucht keinen Zugangsschlüssel und wird deshalb auch bei Drosselung (429) nicht blockiert.
+async function fundamentalRows(symbol, type, module) {
+  try {
+    const rows = await yahooFinance.fundamentalsTimeSeries(symbol, {
+      period1: new Date(Date.now() - 900 * 86400000), type, module
+    }, { validateResult: false });
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) {
+    console.error('Fundamentaldaten ' + module + ' ' + symbol + ': ' + e.message);
+    return [];
+  }
+}
+const lastWith = (rows, key) => [...rows].reverse().find((r) => num(r[key]) !== null) || {};
+
+async function computedValuation(symbol, price) {
+  const [fin, cf, bs] = await Promise.all([
+    fundamentalRows(symbol, 'trailing', 'financials'),
+    fundamentalRows(symbol, 'trailing', 'cash-flow'),
+    fundamentalRows(symbol, 'quarterly', 'balance-sheet')
+  ]);
+  const eps = num(lastWith(fin, 'dilutedEPS').dilutedEPS) ?? num(lastWith(fin, 'basicEPS').basicEPS);
+  const ebit = num(lastWith(fin, 'EBIT').EBIT);
+  const fcf = num(lastWith(cf, 'freeCashFlow').freeCashFlow);
+  const equity = num(lastWith(bs, 'commonStockEquity').commonStockEquity) ?? num(lastWith(bs, 'stockholdersEquity').stockholdersEquity);
+  const shares = num(lastWith(bs, 'ordinarySharesNumber').ordinarySharesNumber) ?? num(lastWith(bs, 'shareIssued').shareIssued);
+  const debt = num(lastWith(bs, 'totalDebt').totalDebt);
+  const cash = num(lastWith(bs, 'cashAndCashEquivalents').cashAndCashEquivalents) ?? 0;
+  const marketCap = price !== null && shares !== null ? price * shares : null;
+  const ev = marketCap !== null && debt !== null ? marketCap + debt - cash : null;
+  return {
+    pe: ratio(price, eps), pb: ratio(marketCap, equity), pfcf: ratio(marketCap, fcf), evEbit: ratio(ev, ebit)
+  };
+}
+
+// Bewertungskennzahlen: bevorzugt Yahoos eigene Werte (wenn der crumb verfügbar ist), sonst berechnet
+async function valuation(symbol, s, price) {
+  let x = {};
+  if (s) {
+    try {
+      x = await yahooFinance.quoteSummary(symbol, {
+        modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData']
+      }, { validateResult: false });
+    } catch (e) {
+      console.error('Kennzahlen ' + symbol + ': ' + e.message);
+    }
+  }
+  const p = (s && s.price) || {}, sd = x.summaryDetail || {}, ks = x.defaultKeyStatistics || {}, fd = x.financialData || {};
+  const px = price ?? num(p.regularMarketPrice);
+  const marketCapY = num(sd.marketCap) ?? num(p.marketCap);
+  const y = {
+    pe: num(sd.trailingPE) ?? ratio(px, num(ks.trailingEps)),
+    pb: num(ks.priceToBook),
+    pfcf: ratio(marketCapY, num(fd.freeCashflow)),
+    evEbit: null
+  };
+  const c = await computedValuation(symbol, px);
+  const pick = (a, b) => (a !== null && a > 0 ? a : b !== null && b > 0 ? b : null);
+  const round = (v) => (v === null ? null : Math.round(v * 100) / 100);
+  const out = {
+    val_pe: round(pick(y.pe, c.pe)), val_pb: round(pick(y.pb, c.pb)),
+    val_pfcf: round(pick(y.pfcf, c.pfcf)), val_ev_ebit: round(pick(y.evEbit, c.evEbit))
+  };
+  console.log('Kennzahlen ' + symbol + ': ' + JSON.stringify(out) + ' (Yahoo ' + JSON.stringify(y) + ', berechnet ' + JSON.stringify(c) + ')');
+  return out;
+}
+
 async function lookup(symbol) {
   // 1) vollständige Details (braucht bei Yahoo einen «crumb», wird manchmal mit 429 gedrosselt)
   let lastErr;
@@ -127,7 +215,9 @@ async function lookup(symbol) {
       const p = s.price || {};
       const a = s.assetProfile || {};
       const country = a.country || null;
+      const val = await valuation(symbol, s, num(p.regularMarketPrice));
       return {
+        ...val,
         symbol: p.symbol || symbol,
         name: p.longName || p.shortName || symbol,
         price: p.regularMarketPrice ?? null,
@@ -168,7 +258,8 @@ async function lookup(symbol) {
   if (price === null && name === symbol) throw lastErr || new Error('Keine Daten von Yahoo erhalten');
   const suffix = symbol.includes('.') ? symbol.split('.').pop().toUpperCase() : '';
   const country = suffix ? (SUFFIX_COUNTRY[suffix] || null) : (sector === 'ETF' ? null : 'United States');
-  return { symbol, name, price, currency, sector, country, region: regionFor(country), partial: true };
+  const val = await valuation(symbol, null, price);
+  return { ...val, symbol, name, price, currency, sector, country, region: regionFor(country), partial: true };
 }
 
 app.get('/api/lookup', wrap(async (req, res) => {
@@ -185,6 +276,10 @@ function cleanLinks(links) {
     .filter((l) => /^https?:\/\//i.test(l.url));
 }
 
+// Kennzahlen aus dem Request: leer/ungültig = unbekannt (null)
+const valNum = (v) => { const n = num(typeof v === 'string' ? v.trim().replace(',', '.') : v); return n === null ? null : Math.round(n * 100) / 100; };
+const valParams = (b) => [valNum(b.val_pe), valNum(b.val_pb), valNum(b.val_pfcf), valNum(b.val_ev_ebit)];
+
 app.get('/api/candidates', wrap(async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM candidates ORDER BY created_at DESC');
   res.json(rows.map(out));
@@ -194,11 +289,14 @@ app.post('/api/candidates', wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.symbol || !b.name) return res.status(400).json({ error: 'Name und Ticker erforderlich' });
   const { rows } = await pool.query(
-    `INSERT INTO candidates (symbol, name, price, entry_price, currency, sector, country, region, notes, links, price_updated_at)
-     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END)
+    `INSERT INTO candidates (symbol, name, price, entry_price, currency, sector, country, region, notes, links, price_updated_at,
+                             val_pe, val_pb, val_pfcf, val_ev_ebit, val_saved_at)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END,
+             $10::numeric,$11::numeric,$12::numeric,$13::numeric, CASE WHEN COALESCE($10::numeric,$11::numeric,$12::numeric,$13::numeric) IS NULL THEN NULL ELSE now() END)
      RETURNING *`,
     [b.symbol, b.name, b.price ?? null, b.currency || null, b.sector || null, b.country || null,
-     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
+     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links)),
+     ...valParams(b)]
   );
   res.status(201).json(out(rows[0]));
 }));
@@ -206,10 +304,13 @@ app.post('/api/candidates', wrap(async (req, res) => {
 app.put('/api/candidates/:id', wrap(async (req, res) => {
   const b = req.body || {};
   const { rows } = await pool.query(
-    `UPDATE candidates SET name=$2, sector=$3, country=$4, region=$5, notes=$6, links=$7
+    `UPDATE candidates SET name=$2, sector=$3, country=$4, region=$5, notes=$6, links=$7,
+            val_pe=$8::numeric, val_pb=$9::numeric, val_pfcf=$10::numeric, val_ev_ebit=$11::numeric,
+            val_saved_at = CASE WHEN COALESCE($8::numeric,$9::numeric,$10::numeric,$11::numeric) IS NULL THEN NULL ELSE COALESCE(val_saved_at, now()) END
      WHERE id=$1 RETURNING *`,
     [req.params.id, b.name, b.sector || null, b.country || null,
-     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links))]
+     b.region || regionFor(b.country), b.notes || '', JSON.stringify(cleanLinks(b.links)),
+     ...valParams(b)]
   );
   if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
   res.json(out(rows[0]));
